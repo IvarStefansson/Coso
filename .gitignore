@@ -1,0 +1,6 @@
+*.vtu
+*.pvd
+*.pptx
+*.msh
+saved_data*
+visualization
