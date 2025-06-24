@@ -1,0 +1,34 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../workdir/porepy"
+		}
+	],
+	"settings": {},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"name": "Python: Current File",
+				"type": "python",
+				"request": "launch",
+				"program": "${file}",
+				"cwd": "${fileDirname}",
+				"console": "integratedTerminal",
+				"justMyCode": false,
+			},
+			{
+				"name": "Debug Tests",
+				"type": "python",
+				"request": "launch",
+				"purpose": ["debug-test"],
+				"console": "integratedTerminal",
+				"justMyCode": false,
+				"env": {"PYTEST_ADDOPTS": "--no-cov"},
+			}
+		]
+	}
+}

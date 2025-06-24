@@ -1,0 +1,13 @@
+Parameter,Value,Unit
+density,998.2,kg * m^-3
+molar_mass,1.0,kg * mol^-1
+critical_pressure,1.0,Pa
+critical_temperature,1.0,K
+critical_specific_volume,1.0,m^3 * kg^-1
+acentric_factor,0.0,-
+compressibility,4.5590000000000005e-10,Pa^-1
+specific_heat_capacity,4182.0,J * kg^-1 * K^-1
+thermal_expansion,0.0002068,K^-1
+viscosity,0.001002,Pa * s
+thermal_conductivity,0.5975,W * m^-1 * K^-1
+normal_thermal_conductivity,1.0,W * m^-1 * K^-1

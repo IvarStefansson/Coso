@@ -1,0 +1,21 @@
+Parameter,Value,Unit
+density,2650.0,kg * m^-3
+biot_coefficient,0.5,-
+dilation_angle,0.3,rad
+fracture_gap,0.0,m
+fracture_normal_stiffness,200000000.0,Pa * m^-1
+fracture_tangential_stiffness,-1.0,Pa * m^-1
+friction_coefficient,0.9,-
+lame_lambda,3216478286.734087,Pa
+maximum_elastic_fracture_opening,0.0001,m
+normal_permeability,1e-05,m^2
+permeability,1e-16,m^2
+porosity,0.01,-
+residual_aperture,2e-05,m
+shear_modulus,35525282569.89887,Pa
+skin_factor,0.0,-
+specific_heat_capacity,720.7,J * kg^-1 * K^-1
+specific_storage,1.0,Pa^-1
+thermal_conductivity,3.1,W * m^-1 * K^-1
+thermal_expansion,9.66e-06,K^-1
+well_radius,0.1,m
