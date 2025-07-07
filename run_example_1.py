@@ -9,6 +9,7 @@ from boundary_conditions import CosoBoundaryConditions
 from initial_conditions import InitialCondition, CopyInitialCondition
 from exporting import CosoExporter, IterationExporting
 from porepy.numerics.nonlinear import line_search
+from porepy.models.solution_strategy import TractionStabilization
 
 import logging
 import sys
@@ -190,8 +191,8 @@ for method, dof in zip(methods, dofs):
 
 
 class ConstraintLineSearchNonlinearSolver(
-    line_search.ConstrainUpdateLineSearch,
-    line_search.ConstrainVariableLineSearch,
+    # line_search.ConstrainUpdateLineSearch,
+    # line_search.ConstrainVariableLineSearch,
     line_search.ConstraintLineSearch,
     line_search.SplineInterpolationLineSearch,
     line_search.LineSearchNewtonSolver,
@@ -229,7 +230,7 @@ if __name__ == "__main__":
         dt_min_max=(1, 2 * dt_init),
         constant_dt=False,
     )
-    cell_size = 9e2
+    cell_size = 10e2
     if fast:
         cell_size = 11e2
     model_params_init = {
@@ -258,10 +259,21 @@ if __name__ == "__main__":
     model_params.update(
         {
             "time_manager": time_manager,
-            "file_name": "elliptic_fractures",
+            "file_name": "elliptic_fractures_no_stabilization",
             "use_wells": True,
         }
     )
+    with_stabilization = 1 == 11
+    if with_stabilization:
+        model_params["traction_stabilization_scaling"] = 1e-1
+        model_params["file_name"] = "elliptic_fractures_with_stabilization"
+
+        class Model(
+            TractionStabilization,
+            Model,
+        ):
+            """Model for the Coso geothermal reservoir with traction stabilization."""
+
     # Create the model
     init_model = Model(model_params_init)
     solver_params = {
