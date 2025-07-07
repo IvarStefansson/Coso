@@ -7,46 +7,54 @@ import os
 
 
 class CosoExporter(pp.PorePyModel):
-    _evaluate_and_scale: Callable[
+    evaluate_and_scale: Callable[
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
 
     def data_to_export(self) -> list:
         data = super().data_to_export()
+        sds = self.mdg.subdomains(dim=self.nd - 1)
+        cell_offsets = np.cumsum([0] + [sd.num_cells for sd in sds])
+        displacement_jump = self.evaluate_and_scale(sds, "displacement_jump", "m")
+        char = self.evaluate_and_scale(sds, "characteristic_contact_traction", "Pa")
+        traction = self.evaluate_and_scale(sds, "contact_traction", "-")
         # Loop over the fracture subdomains
-        for sd in self.mdg.subdomains(dim=self.nd - 1):
+        for id, sd in enumerate(sds):
             # Export the displacement jump.
             data.append(
                 (
                     sd,
                     "displacement_jump",
-                    self._evaluate_and_scale(sd, "displacement_jump", "m"),
+                    displacement_jump[cell_offsets[id] : cell_offsets[id + 1]],
                 )
             )
-            # Export the slip tendency, defined as the ratio of the shear traction to the normal traction.
-            traction = self._evaluate_and_scale(sd, "contact_traction", "-").reshape(
+            # Export the slip tendency, defined as the ratio of the shear traction to
+            # the normal traction.
+            traction_loc = traction[cell_offsets[id] : cell_offsets[id + 1]].reshape(
                 (3, -1), order="F"
             )
-            zero_inds = np.isclose(traction[-1], 0)
-            traction[-1, zero_inds] = -1
-            traction[0, zero_inds] = 1
-            slip_tendency = np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1])
+            zero_inds = np.isclose(traction_loc[-1], 0)
+            traction_loc[-1, zero_inds] = -1
+            traction_loc[0, zero_inds] = 1
+            slip_tendency = np.linalg.norm(traction_loc[:-1], axis=0) / np.abs(
+                traction_loc[-1]
+            )
             data.append((sd, "slip_tendency", slip_tendency))
-            char = self._evaluate_and_scale(sd, "characteristic_contact_traction", "Pa")
+
             data.append((sd, "traction", traction * char))
-            residual = self.equation_system.assemble(evaluate_jacobian=False)
-            data.append((sd, "residual", residual))
+            # residual = self.equation_system.assemble(evaluate_jacobian=False)
+            # data.append((sd, "residual", residual))
         return data
 
     def collect_data(self) -> dict:
         data = {}
         sds = self.mdg.subdomains(dim=self.nd - 2)
         face_offsets = np.cumsum([0] + [sd.num_faces for sd in sds])
-        pressure = self._evaluate_and_scale(sds, "pressure_trace", "Pa")
-        temperature = self._evaluate_and_scale(sds, "temperature_trace", "K")
-        darcy_f = self._evaluate_and_scale(sds, "darcy_flux", "m^3 *s ^-1")
-        enthalpy_f = self._evaluate_and_scale(sds, "enthalpy_flux", "W * m^-2")
-        fluid_f = self._evaluate_and_scale(sds, "fluid_flux", "kg * s^ -1")
+        pressure = self.evaluate_and_scale(sds, "pressure_trace", "Pa")
+        temperature = self.evaluate_and_scale(sds, "temperature_trace", "K")
+        darcy_f = self.evaluate_and_scale(sds, "darcy_flux", "m^3 *s ^-1")
+        enthalpy_f = self.evaluate_and_scale(sds, "enthalpy_flux", "W * m^-2")
+        fluid_f = self.evaluate_and_scale(sds, "fluid_flux", "kg * s^ -1")
         for id, sd in enumerate(sds):
             if not self.is_well(sd):
                 # Skip well subdomains

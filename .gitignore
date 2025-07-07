@@ -2,5 +2,6 @@
 *.pvd
 *.pptx
 *.msh
+*.geo_unrolled
 saved_data*
 visualization
