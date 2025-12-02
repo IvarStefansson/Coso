@@ -1,150 +1,124 @@
 import numpy as np
 import porepy as pp
+from functools import partial
 
 
-class InitialCondition(pp.PorePyModel):
-    def initial_condition(self) -> None:
-        """Set initial conditions for the model.
-        This method sets the initial conditions for the model by reading well data and
-        setting the initial values for pressure and displacement.
-
-        """
-        # First read input from the well data files. This is used when setting initial
-        # BCs.
-        self.read_well_data()
-        super().initial_condition()
-
+class InitialConditionFromDepth:
     def ic_values_pressure(self, sd: pp.Grid) -> np.ndarray:
         return self.hydrostatic_pressure(sd.cell_centers)
 
     def ic_values_displacement(self, sd: pp.Grid) -> np.ndarray:
         depth = self.displacement_from_depth(sd.cell_centers).ravel("F")
         coords = self.displacement_from_coordinates(sd.cell_centers).ravel("F")
-        return depth  # + coords
+        return depth  # np.zeros_like(depth)  # + coords
 
     def ic_values_temperature(self, sd: pp.Grid) -> np.ndarray:
         return self.temperature_from_depth(sd.cell_centers)
 
-    def temperature_from_depth(self, coords: np.ndarray) -> np.ndarray:
-        """Depth-dependent temperature.
 
-        Parameters:
-            coords: Coordinates.
-
-        Returns:
-            Array with temperature values.
-
-        """
-        # Thermal gradient set to 73 K/km, https://gdr.openei.org/submissions/787
-        # For the moment, we use a constant gradient.
-        gradient = self.units.convert_units(7.3e-2, "K*m^-1")
-        temperature = self.reference_variable_values.temperature
-        return temperature + gradient * self.depth(coords)
-
-    def displacement_from_depth(self, coords: np.ndarray) -> np.ndarray:
-        """Depth-dependent displacement.
-
-        The x and y displacements are proportional to the distance from the center of the domain
-        in the xy-plane and to depth. The z displacement is proportional to the depth.
-
-        Parameters:
-            coords ``shape=(3, num_cells)``: Coordinates.
-
-        Returns:
-            Array with displacement values. Shape (nd, num_cells).
-
-        """
-        # Displacement gradient set to .1 mm/km.
-        # For the moment, we use a constant gradient in each direction.
-        gradient = (
-            np.array([0.8, 1.2, 1.0])
-            * self.solid.density
-            * pp.GRAVITY_ACCELERATION
-            / self.bulk_modulus(None)._value
-        )
-        # compute from center of domain in the xy-plane
-        box = self.domain.bounding_box
-        center = np.array([box["xmin"] + box["xmax"], box["ymin"] + box["ymax"]]) / 2
-        # Normalise by box size in the xy-plane
-
-        distances = (center[:, np.newaxis] - coords[:2, :]) / np.array(
-            [box["xmax"] - box["xmin"], box["ymax"] - box["ymin"]]
-        )[:, np.newaxis]
-        # Pad with one for the z-coordinate
-        distances = np.vstack([distances, np.ones_like(distances[0])])
-        # Compute product of gradient, distances and depth
-        return gradient[:, np.newaxis] * distances * self.depth(coords)
-
-    def displacement_from_coordinates(self, coords: np.ndarray) -> np.ndarray:
-        """Displacement from coordinates.
-
-        The x and y displacements are proportional to the distance from the center of the domain
-        in the xy-plane. The z displacement is proportional to the depth.
-
-        Parameters:
-            coords ``shape=(3, num_cells)``: Coordinates.
-
-        Returns:
-            Array with displacement values. Shape (nd, num_cells).
-
-        """
-        # if (
-
-        # ):
-        #     # If the time is before the well protocol offset, set displacement to zero.
-        #     return np.zeros_like(coords)
-        values = self.displacement_from_depth(coords)
-        # Set velocity for all cells. The displacement is scaled with the x-coordinate
-        # and time.
-        if self.params["use_wells"]:
-            x_scaling = coords[0] - self.domain.bounding_box["xmin"]
-            offset_time = 20 * pp.YEAR if self.time_manager.time > 0 else 0
-            values += np.outer(self.boundary_displacement_velocity, x_scaling) * (
-                self.time_manager.time + offset_time
-            )
-        return values
-
-
-class CopyInitialCondition(InitialCondition):
+class CopyInitialCondition:
     """Copy the initial conditions from the parent class.
 
     This is used to copy the initial conditions from the parent class to the child class.
     """
 
-    def well_related_domain(self, d):
-        if isinstance(d, pp.MortarGrid):
+    def boundary_displacement_from_initialization(
+        self, boundary_grid: pp.BoundaryGrid
+    ) -> np.ndarray:
+        """Displacement from initialization model.
+
+        Parameters:
+            boundary_grid: Boundary grid for which to get displacement values.
+
+        Returns:
+            Array with displacement values. Shape (nd * num_cells,).
+
+        """
+        sds = [self.find_initialization_grid(boundary_grid.parent)]
+        mod = self.initialization_model
+        u = mod.displacement(sds)
+
+        # Discretization
+        discr_mech = mod.stress_discretization(sds)
+
+        # Boundary conditions
+        bc = mod.combine_boundary_operators_mechanical_stress(
+            subdomains=sds,
+        )
+
+        # Compute the pseudo-trace of the displacement
+        # Note that this is not the real trace, as this only holds for particular
+        # choices of boundary condtions
+        u_faces_ad = (
+            discr_mech.bound_displacement_cell() @ u
+            + discr_mech.bound_displacement_face() @ bc
+        )
+        u_faces = mod.equation_system.evaluate(u_faces_ad)
+        assert isinstance(u_faces, np.ndarray)
+        return boundary_grid.projection(nd=self.nd) @ u_faces.ravel("F")
+
+    def well_related_domain(self, g: pp.Grid) -> bool:
+        """Check if the grid is related to a well.
+
+        Parameters:
+            g: Grid to check.
+
+        Returns:
+            True if the grid is related to a well, False otherwise.
+        """
+        if isinstance(g, pp.MortarGrid):
             # Skip mortar domains if their primary subdomain is a well
-            g = self.mdg.interface_to_subdomain_pair(d)[0]
+            sd = self.mdg.interface_to_subdomain_pair(g)[0]
         else:
-            g = d
-        if self.is_well(g):
-            # Skip well equations
+            sd = g
+        if self.is_well(sd):
             return True
-        elif g.tags.get("parent_well_index", -1) > -1:
-            # Skip well equations
+        elif sd.tags.get("parent_well_index", -1) > -1:
             return True
         return False
 
-    def copy_initial_conditions(self, sd: pp.Grid, variable: str) -> np.ndarray:
-        def check(sd, g):
-            if sd.num_cells != g.num_cells:
-                return False
-            return np.allclose(sd.cell_centers, g.cell_centers, atol=1e-5)
+    def find_initialization_grid(self, g: pp.Grid) -> pp.Grid:
+        """Find the corresponding grid in the initialization model.
 
-        if isinstance(sd, pp.MortarGrid):
-            for g in self.initialization_model.mdg.interfaces():
-                if check(sd, g):
-                    found = True
-                    break
+        Parameters:
+            g: Grid in the current model.
+
+        Returns:
+            Corresponding grid in the initialization model.
+
+        Raises:
+            ValueError: If the grid is not found in the initialization model.
+        """
+
+        def check(other):
+            if other.num_cells != g.num_cells:
+                return False
+            return np.allclose(other.cell_centers, g.cell_centers, atol=1e-5)
+
+        if isinstance(g, pp.MortarGrid):
+            for intf in self.initialization_model.mdg.interfaces():
+                if check(intf):
+                    return intf
         else:
-            for g in self.initialization_model.mdg.subdomains():
-                if check(sd, g):
-                    found = True
-                    break
-        if not found:
-            raise ValueError(
-                f"Subdomain {sd} not found in initialization model {self.initialization_model}"
-            )
+            for sd in self.initialization_model.mdg.subdomains():
+                if check(sd):
+                    return sd
+        raise ValueError(
+            f"Subdomain {sd} not found in initialization model {self.initialization_model}"
+        )
+
+    def copy_initial_conditions(self, sd: pp.Grid, variable: str) -> np.ndarray:
+        """Copy initial conditions from the initialization model.
+
+        Parameters:
+            sd: Subdomain to copy from.
+            variable: Variable to copy.
+
+        Returns:
+            Array with initial condition values.
+
+        """
+        g = self.find_initialization_grid(sd)
         # Get the variable values from the initialization model
         variables = self.initialization_model.equation_system.get_variables(
             [variable], [g]
@@ -191,3 +165,48 @@ class CopyInitialCondition(InitialCondition):
 
     def ic_values_interface_displacement(self, sd: pp.Grid) -> np.ndarray:
         return self.copy_initial_conditions(sd, "u_interface")
+
+    def reference_displacement_jump(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Reference displacement jump [m].
+
+        Parameters:
+            subdomains: List of fracture subdomains.
+
+        Returns:
+            Cell-wise reference displacement jump.
+
+        """
+        vals = []
+        model = self.initialization_model
+        for sd in subdomains:
+            other = self.find_initialization_grid(sd)
+            vals.append(
+                model.plastic_displacement_jump([other]).value(model.equation_system)
+            )
+        return pp.ad.DenseArray(np.hstack(vals), name="reference_displacement_jump")
+
+    def shear_dilation_gap(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Shear dilation [m].
+
+        Parameters:
+            subdomains: List of fracture subdomains.
+
+        Returns:
+            Cell-wise shear dilation.
+
+        """
+        angle: pp.ad.Operator = self.dilation_angle(subdomains)
+        f_norm = pp.ad.Function(
+            partial(pp.ad.functions.l2_norm, self.nd - 1), "norm_function"
+        )
+        f_tan = pp.ad.Function(pp.ad.functions.tan, "tan_function")
+        shear_dilation: pp.ad.Operator = f_tan(angle) * f_norm(
+            self.tangential_component(subdomains)
+            @ (
+                self.plastic_displacement_jump(subdomains)
+                - self.reference_displacement_jump(subdomains)
+            )
+        )
+
+        shear_dilation.set_name("shear_dilation")
+        return shear_dilation
