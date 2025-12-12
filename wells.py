@@ -75,6 +75,21 @@ class _WellDataBase:
         """
         return well is not None and well.tags["well_name"] in self.production_well_names
 
+    @property
+    def well_names(self) -> list:
+        """List of well names."""
+        return self.injection_well_names + self.production_well_names
+
+    @property
+    def injection_well_names(self) -> list:
+        """List of injection well names."""
+        return ["68-20RD"]
+
+    @property
+    def production_well_names(self) -> list:
+        """List of production well names."""
+        return ["16A-20", "16B-20"]
+
 
 class WellDataCoso(_WellDataBase):
     def read_well_data(self) -> None:
@@ -128,21 +143,6 @@ class WellDataCoso(_WellDataBase):
                 if well is None:
                     raise ValueError(f"Well {well_name} not found in well network.")
                 well.data = well_data
-
-    @property
-    def well_names(self) -> list:
-        """List of well names."""
-        return self.injection_well_names + self.production_well_names
-
-    @property
-    def injection_well_names(self) -> list:
-        """List of injection well names."""
-        return ["68-20RD"]
-
-    @property
-    def production_well_names(self) -> list:
-        """List of production well names."""
-        return ["16A-20", "16B-20"]
 
     def open_well_cells(self, subdomains) -> pp.ad.Operator:
         """Open well cells in the given subdomains.

@@ -16,51 +16,51 @@ class CosoExporter:
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
 
-    def data_to_export(self) -> list:
-        """Returns data for exporting.
+    # def data_to_export(self) -> list:
+    #     """Returns data for exporting.
 
-        Returns:
-            A list of tuples (subdomain, variable name, variable values).
-        """
-        data = super().data_to_export()
-        sds = self.mdg.subdomains(dim=self.nd - 1)
-        cell_offsets = np.cumsum([0] + [sd.num_cells * self.nd for sd in sds])
-        displacement_jump = self.evaluate_and_scale(sds, "displacement_jump", "m")
-        char = self.evaluate_and_scale(sds, "characteristic_contact_traction", "Pa")
-        traction = self.evaluate_and_scale(sds, "contact_traction", "-")
-        # Loop over the fracture subdomains
-        for id, sd in enumerate(sds):
-            # Export the displacement jump.
-            data.append(
-                (
-                    sd,
-                    "displacement_jump",
-                    displacement_jump[cell_offsets[id] : cell_offsets[id + 1]],
-                )
-            )
-            # Export the slip tendency, defined as the ratio of the shear traction to
-            # the normal traction.
-            traction_loc = traction[cell_offsets[id] : cell_offsets[id + 1]].reshape(
-                (3, -1), order="F"
-            )
-            zero_inds = np.isclose(traction_loc[-1], 0)
-            traction_loc[-1, zero_inds] = -1
-            traction_loc[0, zero_inds] = 1
-            slip_tendency = np.linalg.norm(traction_loc[:-1], axis=0) / np.abs(
-                traction_loc[-1]
-            )
-            data.append((sd, "slip_tendency", slip_tendency))
+    #     Returns:
+    #         A list of tuples (subdomain, variable name, variable values).
+    #     """
+    #     data = super().data_to_export()
+    #     sds = self.mdg.subdomains(dim=self.nd - 1)
+    #     cell_offsets = np.cumsum([0] + [sd.num_cells * self.nd for sd in sds])
+    #     displacement_jump = self.evaluate_and_scale(sds, "displacement_jump", "m")
+    #     char = self.evaluate_and_scale(sds, "characteristic_contact_traction", "Pa")
+    #     traction = self.evaluate_and_scale(sds, "contact_traction", "-")
+    #     # Loop over the fracture subdomains
+    #     for id, sd in enumerate(sds):
+    #         # Export the displacement jump.
+    #         data.append(
+    #             (
+    #                 sd,
+    #                 "displacement_jump",
+    #                 displacement_jump[cell_offsets[id] : cell_offsets[id + 1]],
+    #             )
+    #         )
+    #         # Export the slip tendency, defined as the ratio of the shear traction to
+    #         # the normal traction.
+    #         traction_loc = traction[cell_offsets[id] : cell_offsets[id + 1]].reshape(
+    #             (3, -1), order="F"
+    #         )
+    #         zero_inds = np.isclose(traction_loc[-1], 0)
+    #         traction_loc[-1, zero_inds] = -1
+    #         traction_loc[0, zero_inds] = 1
+    #         slip_tendency = np.linalg.norm(traction_loc[:-1], axis=0) / np.abs(
+    #             traction_loc[-1]
+    #         )
+    #         data.append((sd, "slip_tendency", slip_tendency))
 
-            data.append((sd, "traction", traction_loc.ravel("F") * char))
-            # residual = self.equation_system.assemble(evaluate_jacobian=False)
-            # data.append((sd, "residual", residual))
+    #         data.append((sd, "traction", traction_loc.ravel("F") * char))
+    #         # residual = self.equation_system.assemble(evaluate_jacobian=False)
+    #         # data.append((sd, "residual", residual))
 
-        for sd in self.mdg.subdomains(dim=1):
-            if self.parent_well(sd) is not None:
-                if sd.tags.get("open_well_cells", False) is False:
-                    self.open_well_cells([sd])
-                data.append((sd, "open_well_cells", sd.tags["open_well_cells"]))
-        return data
+    #     for sd in self.mdg.subdomains(dim=1):
+    #         if self.parent_well(sd) is not None:
+    #             if sd.tags.get("open_well_cells", False) is False:
+    #                 self.open_well_cells([sd])
+    #             data.append((sd, "open_well_cells", sd.tags["open_well_cells"]))
+    #     return data
 
     def collect_data(self) -> dict:
         """Collect data for well monitoring.
@@ -81,7 +81,7 @@ class CosoExporter:
         darcy_f = self.evaluate_and_scale(sds, "darcy_flux", "m^3 *s ^-1")
         fluid_f = self.evaluate_and_scale(sds, "fluid_flux", "kg * s^ -1")
         for id, sd in enumerate(sds):
-            if not self.is_well(sd):
+            if not self.is_well_grid(sd):
                 # Skip non-well subdomains
                 continue
             top_faces = self.domain_boundary_sides(sd).top
@@ -219,18 +219,12 @@ class CosoExporter:
                 )
 
 
-class IterationExporting:
+class GeometryExporting:
     def initialize_data_saving(self):
         """Initialize iteration exporter."""
         super().initialize_data_saving()
         # Setting export_constants_separately to False facilitates operations such as
         # filtering by dimension in ParaView and is done here for illustrative purposes.
-        self.iteration_exporter = pp.Exporter(
-            self.mdg,
-            file_name=self.params["file_name"] + "_iterations",
-            folder_name=self.params["folder_name"],
-            export_constants_separately=False,
-        )
 
         geometry_exporter = pp.Exporter(
             self.mdg,
@@ -249,53 +243,3 @@ class IterationExporting:
         """
         self.ad_time_step_factor = pp.ad.Scalar(1.0)  # Value adapted elsewhere
         super().prepare_simulation()
-        self.save_data_iteration()
-        self.iteration_exporter.write_pvd()
-
-    def data_to_export_iteration(self):
-        """Returns data for iteration exporting.
-
-        Returns:
-            Any type compatible with data argument of pp.Exporter().write_vtu().
-
-        """
-        # The following is a slightly modified copy of the method
-        # data_to_export() from DataSavingMixin.
-        return self.data_to_export()
-
-    def save_data_iteration(self):
-        """Export current solution to vtu files.
-
-        This method is typically called by after_nonlinear_iteration.
-
-        Having a separate exporter for iterations avoids distinguishing between
-        iterations and time steps in the regular exporter's history (used for
-        export_pvd).
-
-        """
-        # To make sure the nonlinear iteration index does not interfere with the
-        # time part, we multiply the latter by the next power of ten above the
-        # maximum number of nonlinear iterations. Default value set to 10 in
-        # accordance with the default value used in NewtonSolver
-        n = self.params.get("max_iterations", 10)
-        p = round(np.log10(n))
-        r = 10**p
-        if r <= n:
-            r = 10 ** (p + 1)
-        self.iteration_exporter.write_vtu(
-            self.data_to_export_iteration(),
-            time_dependent=True,
-            time_step=self.nonlinear_solver_statistics.num_iteration
-            + r * self.time_manager.time_index,
-        )
-
-    def after_nonlinear_iteration(self, solution_vector: np.ndarray) -> None:
-        """Integrate iteration export into simulation workflow.
-
-        Order of operations is important, super call distributes the solution to
-        iterate subdictionary.
-
-        """
-        super().after_nonlinear_iteration(solution_vector)
-        self.save_data_iteration()
-        self.iteration_exporter.write_pvd()

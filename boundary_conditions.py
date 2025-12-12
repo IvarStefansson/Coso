@@ -1,8 +1,6 @@
 from typing import Callable
 import numpy as np
 import porepy as pp
-import pandas as pd
-import sys
 
 
 class InitialCosoBoundaryConditions:
@@ -24,7 +22,7 @@ class InitialCosoBoundaryConditions:
             Array of temperature boundary values for each cell in the boundary grid.
         """
         return (
-            self.temperature_from_depth(boundary_grid.cell_centers)
+            self.temperature_at_depth(self.depth(boundary_grid.cell_centers))
             * self.initialization_time_dependency_factor()
         )
 
@@ -38,7 +36,7 @@ class InitialCosoBoundaryConditions:
             Array of pressure boundary values for each cell in the boundary grid.
         """
         return (
-            self.hydrostatic_pressure(boundary_grid.cell_centers)
+            self.hydrostatic_pressure(self.depth(boundary_grid.cell_centers))
             * self.initialization_time_dependency_factor()
         )
 
@@ -55,104 +53,19 @@ class InitialCosoBoundaryConditions:
         """
 
         #
-        values = self.displacement_from_coordinates(boundary_grid.cell_centers)
+        # if self.time_manager.time > 1e-5:
+        #     values = self.displacement_from_coordinates(boundary_grid.cell_centers)
+        # else:
+        values = np.zeros((self.nd, boundary_grid.num_cells))
         return values.ravel("F") * self.initialization_time_dependency_factor()
-
-    def bc_values_stress(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
-        """Stress values.
-
-        Parameters:
-            boundary_grid: Boundary grid for which boundary values are to be returned.
-
-        Returns:
-            Array of boundary values, with one value for each dimension of the
-                problem, for each face in the subdomain.
-
-        """
-        # SHmin = [0.62:0.63] * Sv
-        # SHmin = 38.85 MPa at 2338m depth
-        # SHmax = [1.2 : 1.9] * Sv
-        # For now, assume SHmax is aligned with the north-south direction, corresponding
-        # to the y-axis.
-        values = np.zeros((3, boundary_grid.num_cells))
-        gradient = (
-            np.array([0.62, 1.55, 1.0])
-            * (
-                self.solid.density * (1 - self.solid.porosity)
-                + self.fluid.reference_component.density * self.solid.porosity
-            )
-            * pp.GRAVITY_ACCELERATION
-        )
-        domain_sides = self.domain_boundary_sides(boundary_grid)
-        depth = self.depth(boundary_grid.cell_centers)
-        time_dep_factor = self.initialization_time_dependency_factor()
-        # The sign of the stress depends on the side of the domain according to the
-        # direction of the normal vector.
-        for i, sides in enumerate(
-            [["west", "east"], ["south", "north"], ["bottom", "top"]]
-        ):
-            for side, sign in zip(sides, [1, -1]):
-                ind = getattr(domain_sides, side)
-                if np.any(ind):
-                    values[i, ind] = (
-                        gradient[i]
-                        * depth[ind]
-                        * sign
-                        * boundary_grid.cell_volumes[ind]
-                        * time_dep_factor
-                    )
-
-        return values.ravel("F")
 
     def initialization_time_dependency_factor(self) -> float:
         val = self.time_manager.time / self.time_manager.time_final
         self.ad_time_step_factor.set_value(val)
         return 1  # self.time_manager.time > 0
 
-    def body_force(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
-        return super().body_force(subdomains) * self.ad_time_step_factor
 
-    def bc_type_mechanics(self, sd: pp.Grid) -> pp.BoundaryConditionVectorial:
-        """Boundary condition type for mechanics.
-
-        Dirichlet boundary conditions are defined on all boundaries except the top.
-
-        Parameters:
-            sd: Subdomain for which to define boundary conditions.
-
-        Returns:
-            bc: Boundary condition object.
-
-        """
-        if sd.dim < self.nd:
-            return super().bc_type_mechanics(sd)
-        bc = pp.BoundaryConditionVectorial(sd, self.fixed_faces(sd), "dir")
-        bc.internal_to_dirichlet(sd)
-        return bc
-
-    def fixed_faces(self, sd: pp.Grid) -> np.ndarray:
-        """Get the faces where displacement is fixed.
-
-        Parameters:
-            sd: Subdomain for which to get the fixed faces.
-
-        Returns:
-            Array of booleans indicating which faces are fixed.
-
-        """
-        domain_sides = self.domain_boundary_sides(sd)
-        dir_sides = domain_sides.bottom
-        # Pick out the three faces that are closest to the mean coordinate of the bottom
-        # side.
-        coords = sd.face_centers[:, dir_sides]
-        mean_coord = np.mean(coords, axis=1)
-        distances = np.linalg.norm(coords - mean_coord[:, np.newaxis], axis=0)
-        fixed_faces = np.zeros(sd.num_faces, dtype=bool)
-        fixed_faces[np.nonzero(dir_sides)[0][np.argsort(distances)[:3]]] = True
-        return fixed_faces
-
-
-class CosoBoundaryConditions:
+class CosoBoundaryConditionsDisplacement:
     """Boundary conditions for the Coso geothermal reservoir model.
 
     We impose a displacement value scaling linearly with x and time on all boundaries
@@ -173,8 +86,6 @@ class CosoBoundaryConditions:
 
         """
 
-        # TODO: Replace by initial condition, which can be pre-computed to match
-        # background stress.
         if boundary_grid.dim < self.nd - 1:
             return super().bc_values_displacement(boundary_grid)
         values = self.boundary_displacement_from_initialization(boundary_grid)
@@ -202,15 +113,7 @@ class CosoBoundaryConditions:
             bc: Boundary condition object.
 
         """
-        domain_sides = self.domain_boundary_sides(sd)
-        dir_sides = (
-            domain_sides.bottom
-            + domain_sides.east
-            + domain_sides.west
-            + domain_sides.south
-            + domain_sides.north
-        )
-        dir_sides = domain_sides.all_bf
+        dir_sides = self.domain_boundary_sides(sd).all_bf
         bc = pp.BoundaryConditionVectorial(sd, dir_sides, "dir")
         bc.internal_to_dirichlet(sd)
         return bc
@@ -228,25 +131,25 @@ class CosoBoundaryConditions:
         Geothermal Field (CGF) and surrounding areas by applying interferometric
         synthetic aperture radar (InSAR) to satellite scenes from Envisat (June 2004 ̶
         October 2010) and Sentinel (November 2014–April 2018). The measurements are done
-        in the line of sight (LOS) to each satellite, within an area of size~ 450 km2,
+        in the line of sight (LOS) to each satellite, within an area of size ~450 km2,
         at the locations of hundreds of thousands permanent and distributed scatterers.
         Thirty descending (satellite moves north to south) and 45 ascending (south to
         north) images were used from Envisat, and 63 descending and 65 ascending from
         Sentinel. A decomposition into average vertical and east horizontal components
         is also performed in more than 35,000 100-m pixels where both types of LOS
-        measurements are available. The main observations at CGF include:(1) a
-        subsidence area of size~ 70 km2, with a maximum subsidence of–27.6 mm/year for
-        the Envisat period and lower maximum subsidence of–19.1 mm/year for the Sentinel
-        period;(2) eastward movements in the western part of the subsidence area, with
-        Envisat maximum of+ 23.9 mm/year and a lower Sentinel maximum of+ 15.9
-        mm/year;(3) westward displacements in the eastern part of the subsidence area,
-        with Envisat maximum of ̶ 14.2 mm/year and Sentinel maximum of–11.9 mm/year;(4)
-        very good agreement of the InSAR observations with leveling survey data;(5)
-        earthquake clusters in the subsidence area and hypocentral cross-sections
-        showing clusters at various depths and migration in time; and (6) good
-        predictions of the overall geothermal resource, based on poroelastic modeling
-        using both leveling and InSAR data. The ultimate goal of the project is to
-        provide geothermal operators with tools that can be used in reservoir
+        measurements are available. The main observations at CGF include: (1) a
+        subsidence area of size ~70 km2, with a maximum subsidence of –27.6 mm/year for
+        the Envisat period and lower maximum subsidence of –19.1 mm/year for the
+        Sentinel period; (2) eastward movements in the western part of the subsidence
+        area, with Envisat maximum of +23.9 mm/year and a lower Sentinel maximum of
+        +15.9 mm/year; (3) westward displacements in the eastern part of the subsidence
+        area, with Envisat maximum of ̶ 14.2 mm/year and Sentinel maximum of –11.9
+        mm/year; (4) very good agreement of the InSAR observations with leveling survey
+        data; (5) earthquake clusters in the subsidence area and hypocentral
+        cross-sections showing clusters at various depths and migration in time; and (6)
+        good predictions of the overall geothermal resource, based on poroelastic
+        modeling using both leveling and InSAR data. The ultimate goal of the project is
+        to provide geothermal operators with tools that can be used in reservoir
         management."""
         # The relative displacement rate is approx. 24 + 14 mm/year.
         # The area of the Coso Geothermal Field is 450 km2, which is 450e6 m2, so the
@@ -260,6 +163,8 @@ class CosoBoundaryConditions:
         )
         return np.array([1.0, 1.0, 0.0]) * self.units.convert_units(rate, "s^-1")
 
+
+class CosoBoundaryConditions:
     def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
         """Pressure boundary values.
 
@@ -270,7 +175,7 @@ class CosoBoundaryConditions:
             Array of pressure boundary values for each cell in the boundary grid.
         """
         if boundary_grid.dim == 2:
-            return self.hydrostatic_pressure(boundary_grid.cell_centers)
+            return self.hydrostatic_pressure(self.depth(boundary_grid.cell_centers))
         # Else, we are at the top of a well. The pressure is set to the well head
         # pressure.
         # Get the parent well of the subdomain.
@@ -300,7 +205,7 @@ class CosoBoundaryConditions:
             Array of temperature boundary values for each cell in the boundary grid.
         """
         if boundary_grid.dim == 2:
-            return self.temperature_from_depth(boundary_grid.cell_centers)
+            return self.temperature_at_depth(self.depth(boundary_grid.cell_centers))
         # Get the parent well of the subdomain.
         sd = boundary_grid.parent
         parent_well = self.parent_well(sd)

@@ -5,15 +5,10 @@ from functools import partial
 
 class InitialConditionFromDepth:
     def ic_values_pressure(self, sd: pp.Grid) -> np.ndarray:
-        return self.hydrostatic_pressure(sd.cell_centers)
-
-    def ic_values_displacement(self, sd: pp.Grid) -> np.ndarray:
-        depth = self.displacement_from_depth(sd.cell_centers).ravel("F")
-        coords = self.displacement_from_coordinates(sd.cell_centers).ravel("F")
-        return depth  # np.zeros_like(depth)  # + coords
+        return self.hydrostatic_pressure(self.depth(sd.cell_centers))
 
     def ic_values_temperature(self, sd: pp.Grid) -> np.ndarray:
-        return self.temperature_from_depth(sd.cell_centers)
+        return self.temperature_at_depth(self.depth(sd.cell_centers))
 
 
 class CopyInitialCondition:
@@ -39,8 +34,7 @@ class CopyInitialCondition:
         u = mod.displacement(sds)
 
         # Discretization
-        discr_mech = mod.stress_discretization(sds)
-
+        discr = mod.stress_discretization(sds)
         # Boundary conditions
         bc = mod.combine_boundary_operators_mechanical_stress(
             subdomains=sds,
@@ -50,9 +44,16 @@ class CopyInitialCondition:
         # Note that this is not the real trace, as this only holds for particular
         # choices of boundary condtions
         u_faces_ad = (
-            discr_mech.bound_displacement_cell() @ u
-            + discr_mech.bound_displacement_face() @ bc
+            discr.bound_displacement_cell() @ u + discr.bound_displacement_face() @ bc
         )
+        if isinstance(self, pp.Poromechanics):
+            # Add contribution from pressure
+            p = mod.perturbation_from_reference("pressure", sds)
+            u_faces_ad += discr.bound_displacement_pressure(mod.darcy_keyword) @ p
+        if isinstance(self, pp.Thermoporomechanics):
+            # Add contribution from temperature
+            T = mod.perturbation_from_reference("temperature", sds)  # Krymper uten.
+            u_faces_ad += discr.bound_displacement_pressure(mod.enthalpy_keyword) @ T
         u_faces = mod.equation_system.evaluate(u_faces_ad)
         assert isinstance(u_faces, np.ndarray)
         return boundary_grid.projection(nd=self.nd) @ u_faces.ravel("F")
@@ -71,7 +72,7 @@ class CopyInitialCondition:
             sd = self.mdg.interface_to_subdomain_pair(g)[0]
         else:
             sd = g
-        if self.is_well(sd):
+        if self.is_well_grid(sd):
             return True
         elif sd.tags.get("parent_well_index", -1) > -1:
             return True
@@ -129,7 +130,7 @@ class CopyInitialCondition:
 
     def ic_values_pressure(self, sd: pp.Grid) -> np.ndarray:
         if self.well_related_domain(sd):
-            return self.hydrostatic_pressure(sd.cell_centers)
+            return self.hydrostatic_pressure(self.depth(sd.cell_centers))
         else:
             return self.copy_initial_conditions(sd, "pressure")
 
@@ -141,7 +142,7 @@ class CopyInitialCondition:
 
     def ic_values_temperature(self, sd: pp.Grid) -> np.ndarray:
         if self.well_related_domain(sd):
-            return self.temperature_from_depth(sd.cell_centers)
+            return self.temperature_at_depth(self.depth(sd.cell_centers))
         else:
             return self.copy_initial_conditions(sd, "temperature")
 

@@ -3,22 +3,6 @@ import porepy as pp
 
 
 class CosoBackgroundValues:
-    def temperature_from_depth(self, coords: np.ndarray) -> np.ndarray:
-        """Depth-dependent temperature.
-
-        Parameters:
-            coords: Coordinates.
-
-        Returns:
-            Array with temperature values.
-
-        """
-        # Thermal gradient set to 73 K/km, https://gdr.openei.org/submissions/787
-        # For the moment, we use a constant gradient.
-        gradient = self.units.convert_units(7.3e-2, "K*m^-1") / 300
-        temperature = self.units.convert_units(300.0, "K")
-        return temperature + gradient * self.depth(coords)
-
     def displacement_from_depth(self, coords: np.ndarray) -> np.ndarray:
         """Depth-dependent displacement.
 
@@ -35,7 +19,9 @@ class CosoBackgroundValues:
         # Displacement gradient set to .1 mm/km.
         # For the moment, we use a constant gradient in each direction.
         gradient = (
-            np.array([0.62, 1.55, 1.0])
+            self.parameters.get(
+                "lithostatic_stress_multipliers", np.array([1.0, 1.0, 1.0])
+            )
             * (
                 self.solid.density * (1 - self.solid.porosity)
                 + self.fluid.reference_component.density * self.solid.porosity
@@ -85,22 +71,13 @@ class CosoBackgroundValues:
             )
         return values
 
-    def hydrostatic_pressure(self, coords) -> np.ndarray:
-        p_top = self.reference_variable_values.pressure
-
-        # Hydrostatic pressure at the top of the domain
-        rho = self.fluid.reference_component.density
-        g = self.units.convert_units(pp.GRAVITY_ACCELERATION, "m*s^-2")
-
-        # Hydrostatic pressure
-        p = p_top + rho * g * self.depth(coords)
-        return p
-
 
 class PhysicalModel(
-    CosoBackgroundValues,
+    # CosoBackgroundValues,
     pp.constitutive_laws.GravityForce,
+    # pp.SinglePhaseFlow,
     pp.Thermoporomechanics,
     # pp.Poromechanics,
+    # pp.MomentumBalance,
 ):
     """Model for the Coso geothermal reservoir."""

@@ -9,7 +9,10 @@ from save_fracture_coords import (
 from exporting import CosoExporter
 import sys
 from wells import WellDataConceptual, WellDataCoso
-from porepy.applications.md_grids.model_geometries import SubsurfaceCuboidDomain
+from porepy.applications.md_grids.model_geometries import (
+    SubsurfaceCuboidDomain,
+    TwoEllipticFractures3d,
+)
 
 
 class CosoGeometry:
@@ -247,7 +250,7 @@ class FractureGeometry2(EllipticFractureGeometry):
         )
 
 
-class ConceptualGeometry(SubsurfaceCuboidDomain):
+class ConceptualGeometry(TwoEllipticFractures3d):
     def set_well_network(self) -> None:
         """Assign well network class."""
         if not self.params.get("use_wells", True):
@@ -256,7 +259,7 @@ class ConceptualGeometry(SubsurfaceCuboidDomain):
         wells = []
         x_in = np.full((1, 3), -1)
         y_in = np.array([[2, 2, -2]])
-        z_in = np.array([[0, -2, -2]])
+        z_in = np.array([[0, -2, -3]])
         pts = np.vstack([x_in, y_in, z_in]) * pp.KILO * pp.METER
         name = self.injection_well_names[0]
         # Create a well object.
@@ -264,32 +267,35 @@ class ConceptualGeometry(SubsurfaceCuboidDomain):
         wells.append(well)
         x_prod = np.full((1, 2), 1.0)
         y_prod = np.array([[0, 0]])
-        z_prod = np.array([[0, -3]])
+        z_prod = np.array([[0, -4]])
         pts = np.vstack([x_prod, y_prod, z_prod]) * pp.KILO * pp.METER
         name = self.production_well_names[0]
         # Create a well object.
         well = pp.Well(pts, tags={"well_name": name})
         wells.append(well)
         self.well_network = pp.WellNetwork3d(
-            domain=self._domain, wells=wells, parameters={"mesh_size": 25.0}
+            domain=self._domain, wells=wells, parameters={"mesh_size": 125.0}
         )
 
+    def domain_size(self) -> float:
+        return self.units.convert_units(self.params.get("domain_size", 3.0e3), "m")
+
     def set_domain(self):
-        s = 3.0e3
+        s = self.domain_size()
         box = {
             "xmin": -s,
             "xmax": s,
             "ymin": -s,
             "ymax": s,
-            "zmin": -5e3,
+            "zmin": -2 * s,
             "zmax": 0e2,
         }
         self._domain = pp.Domain(bounding_box=box)
 
     def set_fractures(self):
-        center = self.units.convert_units(
-            np.array([-1.0, 1.0, -2.0]) * pp.KILO * pp.METER, "m"
-        )
+        s = self.domain_size() / 3.0
+        center = s * np.array([-1.0, 1.0, -3.0])
+
         # Create a single elliptic fracture
         num_points = 10
         self._fractures = [
@@ -297,38 +303,34 @@ class ConceptualGeometry(SubsurfaceCuboidDomain):
                 center=center,
                 strike_angle=np.pi / 4,
                 dip_angle=np.pi / 2,
-                major_axis=5.0e2,
-                minor_axis=5.0e2,
+                major_axis=self.fracture_major_axes[0],
+                minor_axis=self.fracture_minor_axes[0],
                 major_axis_angle=0,
                 num_points=num_points,
             )
         ]
-        center = self.units.convert_units(
-            np.array([-1.0, -1.0, -2.0]) * pp.KILO * pp.METER, "m"
-        )
+        center = s * np.array([-1.0, -1.0, -3.0])
 
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center,
                 strike_angle=np.pi / 4,
                 dip_angle=np.pi / 2,
-                major_axis=5.0e2,
-                minor_axis=5.0e2,
+                major_axis=self.fracture_major_axes[1],
+                minor_axis=self.fracture_minor_axes[1],
                 major_axis_angle=0,
                 num_points=num_points,
             )
         )
-        center_injection = self.units.convert_units(
-            np.array([1.0, 0, -2.0]) * pp.KILO * pp.METER, "m"
-        )
+        center_injection = s * np.array([1.0, 0, -3.0])
         # Create a single elliptic fracture
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center_injection,
                 strike_angle=0,
                 dip_angle=0,
-                major_axis=4.0e2,
-                minor_axis=4.0e2,
+                major_axis=self.fracture_major_axes[2],
+                minor_axis=self.fracture_minor_axes[2],
                 major_axis_angle=0,
                 num_points=num_points,
             )

@@ -41,11 +41,11 @@ granodiorite_values = {
     "dilation_angle": 0.2,  # TODO: Find a reference and a value
     "permeability": 5e-16,  # [2], p. 1
     "fracture_gap": 0e-4,  # TODO: Find a reference and a value
-    "residual_aperture": 2e-3,  # TODO: Find a reference and a value
+    "residual_aperture": 1e-3,  # TODO: Find a reference and a value
     "well_radius": 1e-1,  # TODO: Find a reference and a value. Not too far off if LineID can be trusted.
     "normal_permeability": 1e-5,  # TODO: Reconsider model.
     "fracture_normal_stiffness": 1e9,  # TODO: Find a reference and a value
-    "maximum_elastic_fracture_opening": 1e-3,  # TODO: Find a reference and a value
+    "maximum_elastic_fracture_opening": 0e-3,  # TODO: Find a reference and a value
 }
 copy_names = ["thermal_conductivity", "specific_heat_capacity", "thermal_expansion"]
 for name in copy_names:
