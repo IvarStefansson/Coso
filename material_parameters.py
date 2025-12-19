@@ -30,7 +30,7 @@ def compute_lame_lambda(bulk_modulus, youngs_modulus):
 granodiorite_values = {
     "density": 2650,  # [1], p. 5
     "porosity": 0.01,  # [1], p. 5
-    "friction_coefficient": 0.65,  # [1], p. 6 Range: 0.81-1.19!
+    "friction_coefficient": 0.9,  # [1], p. 6 Range: 0.81-1.19!
     "lame_lambda": compute_lame_lambda(
         bulk_modulus_granodiorite, youngs_modulus_granodiorite
     ),
@@ -39,7 +39,7 @@ granodiorite_values = {
     ),
     "biot_coefficient": 0.5,  # TODO: Find a reference and a value
     "dilation_angle": 0.2,  # TODO: Find a reference and a value
-    "permeability": 5e-16,  # [2], p. 1
+    "permeability": 5e-15,  # [2], p. 1
     "fracture_gap": 0e-4,  # TODO: Find a reference and a value
     "residual_aperture": 1e-3,  # TODO: Find a reference and a value
     "well_radius": 5e-2,  # TODO: Find a reference and a value. Not too far off if LineID can be trusted.

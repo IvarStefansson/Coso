@@ -121,11 +121,11 @@ if __name__ == "__main__":
     fast = 1 == 11  # Set to 1 for fast run, 0 for full run
     # Define the time parameters
     logger.info("Starting the simulation")
-    dt = pp.HOUR
+    dt = 1e3
     # injection_start_time = 10e3
     # Include dt to make sure itis included in the time steps which are exported.
     schedule = np.array([0, 1, 10, 20, 50, 80, 111, 112, 113, 114, 115, 116]) * pp.DAY
-    schedule = np.array([0, dt, pp.DAY, 100 * pp.DAY])
+    schedule = np.array([0, 2 * dt, pp.DAY, 100 * pp.DAY])
     if fast:
         injection_start_time = 10  # 0.2 * pp.YEAR
         schedule = np.arange(2) * 10.0  # pp.HOUR
@@ -142,12 +142,12 @@ if __name__ == "__main__":
         recomp_factor=0.2,
         recomp_max=10,
     )
-    dt_init = 1e9  # * pp.YEAR
+    dt_init = 2e9  # * pp.YEAR
     time_manager_init = pp.TimeManager(
-        [0, 5 * dt_init],
+        [0, 3 * dt_init],
         dt_init=dt_init,
         dt_min_max=(1, 2 * dt_init),
-        constant_dt=False,
+        constant_dt=True,
     )
     fracture_size = 7e2
     cell_size = 12e2
@@ -190,7 +190,7 @@ if __name__ == "__main__":
         #     temperature=300.0,
         #     pressure=pp.BAR,
         # ),
-        "thermal_gradient": 0.073,  # K/m  tåltes ikke
+        "thermal_gradient": 0.05,  # 73,  # K/m  tåltes ikke
         "fracture_file": "coords.txt",
         "folder_name": folder_name,
         "initialization": True,
@@ -207,11 +207,15 @@ if __name__ == "__main__":
     if fast:
         model_params_init["data_folder_name"] = "saved_data_fast_runs"
     model_params = copy.deepcopy(model_params_init)
-    injection_pressures = np.full(schedule.shape, 15 * pp.MEGA * pp.PASCAL)
+    # Reduce target pressure in favour of displacement BC as driving force?
+    injection_pressures = np.full(schedule.shape, 10 * pp.MEGA * pp.PASCAL)
     if issubclass(MainModel, NeumannWellBCsFirstTimeInterval):
-        injection_pressures[0] = 0  # pp.MEGA * pp.PASCAL
-        injection_pressures[1] = 0.5 * pp.MEGA * pp.PASCAL
-    production_pressures = np.full(schedule.shape, pp.BAR)
+        injection_pressures[0] = 2.0 * pp.MEGA * pp.PASCAL
+        injection_pressures[1] = 3.0 * pp.MEGA * pp.PASCAL
+    else:
+        injection_pressures[0] = 1.5 * pp.MEGA * pp.PASCAL
+
+    production_pressures = np.full(schedule.shape, 0.0 * pp.MEGA * pp.PASCAL)  # Reduce
     injection_temperatures = np.full(schedule.shape, 323.15)
     production_temperatures = np.full(schedule.shape, 373.15)
     # Can be refined to have different schedules for each well.
@@ -221,6 +225,9 @@ if __name__ == "__main__":
     for name in MainModel.production_well_names.fget(None):
         model_params[f"{name}_pressures"] = production_pressures
         model_params[f"{name}_temperatures"] = production_temperatures
+
+    granodiorite_values["friction_coefficient"] = 0.66  # Slightly too high? Compute
+    # from initialization model's final stress tendencies?
     model_params.update(
         {
             "time_manager": time_manager,
@@ -239,8 +246,8 @@ if __name__ == "__main__":
     init_model = InitializationModel(model_params_init)
     solver_params = {
         "nl_convergence_tol_res": 1e-1,
-        "nl_convergence_tol": 1e-5,  # Seems to be the best we can do with current condition number
-        "nl_divergence_tol": 1e20,  # Seems to be the best we can do with current condition number
+        "nl_convergence_tol": 5e-5,
+        "nl_divergence_tol": 1e20,
         "max_iterations": 40,
         "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
         "local_line_search": 1,
@@ -257,12 +264,13 @@ if __name__ == "__main__":
         m.fluid.density(ma).value(m.equation_system)
     else:
         pp.run_time_dependent_model(init_model, solver_params)
-        model = MainModel(model_params)
+        model = MainModel(model_params)  # Load from initialization from file
         model.initialization_model = init_model
         solver_params.update(
             {
                 "local_line_search": 1,
-                "nl_convergence_tol_res": 5e0,
+                "global_line_search": 1,
+                "nl_convergence_tol_res": 1e0,
             }
         )
         pp.run_time_dependent_model(model, solver_params)
