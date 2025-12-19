@@ -30,7 +30,7 @@ def compute_lame_lambda(bulk_modulus, youngs_modulus):
 granodiorite_values = {
     "density": 2650,  # [1], p. 5
     "porosity": 0.01,  # [1], p. 5
-    "friction_coefficient": 0.9,  # [1], p. 6 Range: 0.81-1.19!
+    "friction_coefficient": 0.65,  # [1], p. 6 Range: 0.81-1.19!
     "lame_lambda": compute_lame_lambda(
         bulk_modulus_granodiorite, youngs_modulus_granodiorite
     ),
@@ -42,8 +42,8 @@ granodiorite_values = {
     "permeability": 5e-16,  # [2], p. 1
     "fracture_gap": 0e-4,  # TODO: Find a reference and a value
     "residual_aperture": 1e-3,  # TODO: Find a reference and a value
-    "well_radius": 1e-1,  # TODO: Find a reference and a value. Not too far off if LineID can be trusted.
-    "normal_permeability": 1e-5,  # TODO: Reconsider model.
+    "well_radius": 5e-2,  # TODO: Find a reference and a value. Not too far off if LineID can be trusted.
+    "normal_permeability": 1e-8,  # TODO: Reconsider model.
     "fracture_normal_stiffness": 1e9,  # TODO: Find a reference and a value
     "maximum_elastic_fracture_opening": 0e-3,  # TODO: Find a reference and a value
 }
