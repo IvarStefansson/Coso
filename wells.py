@@ -268,3 +268,36 @@ class WellDataConceptual(_WellDataBase):
             sd.tags["open_well_cells"] = ind
             all_vals.append(ind)
         return pp.ad.DenseArray(np.hstack(all_vals))
+
+    def update_time_dependent_ad_arrays(self) -> None:
+        """Update time-dependent ad arrays."""
+        super().update_time_dependent_ad_arrays()
+        for sd, data in self.mdg.subdomains(return_data=True, dim=1):
+            if not self.is_well_grid(sd):
+                continue
+            data["open_well_cells"] = self.set_open_well_cells(sd)
+
+    def set_open_well_cells(self, sd) -> np.ndarray:
+        """Open well cells in the given subdomains.
+
+        Parameters:
+            subdomains: Subdomains where to open well cells.
+        """
+        z = {
+            "68-20RD": np.array([1.1, 0]),
+            "16A-20": np.array([1.1, 0.0]),
+            "16B-20": np.array([2.484, 3.196]),
+        }
+        z = {name: self.units.convert_units(z * pp.KILO, "m") for name, z in z.items()}
+        well = self.parent_well(sd)
+        assert well is not None, f"No well found for subdomain {sd}"
+        ind = np.ones(sd.num_cells, dtype=int)
+        if well.tags["well_name"] == "16A-20":
+            coord_vals = z[well.tags["well_name"]]
+            axis = 1
+            where = np.logical_and(
+                sd.cell_centers[axis, :] <= coord_vals[0],
+                sd.cell_centers[axis, :] >= coord_vals[1],
+            )
+            ind[where] = 0
+        return ind
