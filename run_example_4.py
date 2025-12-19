@@ -149,7 +149,7 @@ if __name__ == "__main__":
         dt_min_max=(1, 2 * dt_init),
         constant_dt=True,
     )
-    fracture_size = 7e2
+    fracture_size = 6e2
     cell_size = 12e2
     if fast:
         cell_size = 2e3
