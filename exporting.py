@@ -16,13 +16,38 @@ class CosoExporter:
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
 
-    # def data_to_export(self) -> list:
-    #     """Returns data for exporting.
+    def data_to_export(self) -> list:
+        """Returns data for exporting.
 
-    #     Returns:
-    #         A list of tuples (subdomain, variable name, variable values).
-    #     """
-    #     data = super().data_to_export()
+        Returns:
+            A list of tuples (subdomain, variable name, variable values).
+        """
+        data = super().data_to_export()
+        for sd in self.mdg.subdomains():
+            depth = self.depth(sd.cell_centers)
+            data.append(
+                (
+                    sd,
+                    "depth",
+                    self.units.convert_units(depth, "m"),
+                )
+            )
+            data.append(
+                (
+                    sd,
+                    "hydrostatic_pressure",
+                    self.units.convert_units(self.hydrostatic_pressure(depth), "Pa"),
+                )
+            )
+        for sd, d in self.mdg.subdomains(return_data=True):
+            if not self.is_well_grid(sd):
+                continue
+            if "open_well_cells" in d:
+                data.append((sd, "open_well_cells", d["open_well_cells"]))
+            well_tag = int(self.well_names[sd.tags["parent_well_index"]][:2])
+            data.append((sd, "well_name", np.full(sd.num_cells, well_tag)))
+        return data
+
     #     sds = self.mdg.subdomains(dim=self.nd - 1)
     #     cell_offsets = np.cumsum([0] + [sd.num_cells * self.nd for sd in sds])
     #     displacement_jump = self.evaluate_and_scale(sds, "displacement_jump", "m")
@@ -69,6 +94,9 @@ class CosoExporter:
             A dictionary with well names as keys and another dictionary as value.
             The inner dictionary has variable names as keys and their values.
         """
+        if not hasattr(self, "_data_collection_times"):
+            self._data_collection_times = []
+        self._data_collection_times.append(self.time_manager.time)
         data = {}
         sds = self.mdg.subdomains(dim=self.nd - 2)
         face_offsets = np.cumsum([0] + [sd.num_faces for sd in sds])
@@ -127,7 +155,7 @@ class CosoExporter:
         The results are saved in a CSV file in the specified folder. The file contains
         time, well name, and the monitored variables."""
         records = []
-        for time, data in zip(self.time_manager.schedule[1:], self.results):
+        for time, data in zip(self._data_collection_times, self.results):
             for well_name, variables in data.items():
                 record = {"time": time, "well_name": well_name}
                 record.update(variables)
@@ -243,3 +271,12 @@ class GeometryExporting:
         """
         self.ad_time_step_factor = pp.ad.Scalar(1.0)  # Value adapted elsewhere
         super().prepare_simulation()
+
+    def save_data_time_step(self) -> None:
+        super().save_data_time_step()
+        t = self.time_manager.time  # current time
+        scheduled = self.time_manager.schedule[1:]  # scheduled times except t_init
+        if not any(np.isclose(t, scheduled)):  # Invert logic of super.
+            collected_data = self.collect_data()
+            if collected_data is not None:
+                self.results.append(collected_data)
