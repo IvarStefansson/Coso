@@ -257,24 +257,27 @@ class ConceptualGeometry(TwoEllipticFractures3d):
             return super().set_well_network()
         # Read well network from file.
         wells = []
-        x_in = np.full((1, 3), -1)
-        y_in = np.array([[2, 2, -2]])
-        z_in = np.array([[0, -2, -3]])
-        pts = np.vstack([x_in, y_in, z_in]) * pp.KILO * pp.METER
-        name = self.injection_well_names[0]
+        s = self.domain_size() / 3.0
+        x_prod = np.full((1, 3), 1.0)
+        y_prod = np.array([[1, 1, -1]])
+        z_prod = np.array([[0, -3, -3]])
+        pts_prod = np.vstack([x_prod, y_prod, z_prod]) * s
         # Create a well object.
-        well = pp.Well(pts, tags={"well_name": name})
-        wells.append(well)
-        x_prod = np.full((1, 2), 1.0)
-        y_prod = np.array([[0, 0]])
-        z_prod = np.array([[0, -4]])
-        pts = np.vstack([x_prod, y_prod, z_prod]) * pp.KILO * pp.METER
-        name = self.production_well_names[0]
+        well_prod = pp.Well(
+            pts_prod, tags={"well_name": self.production_well_names[0]}
+        )  # 16a20
+        wells.append(well_prod)
+        x_inj = np.full((1, 3), -1)
+        y_inj = np.array([[2, 2, -1.5]])
+        z_inj = np.array([[0, -3, -3]])
+        pts_inj = np.vstack([x_inj, y_inj, z_inj]) * s
         # Create a well object.
-        well = pp.Well(pts, tags={"well_name": name})
+        well = pp.Well(
+            pts_inj, tags={"well_name": self.injection_well_names[0]}
+        )  # 68 20rd
         wells.append(well)
         self.well_network = pp.WellNetwork3d(
-            domain=self._domain, wells=wells, parameters={"mesh_size": 125.0}
+            domain=self._domain, wells=wells, parameters={"mesh_size": 250.0}
         )
 
     def domain_size(self) -> float:
@@ -328,7 +331,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
             pp.create_elliptic_fracture(
                 center=center_injection,
                 strike_angle=0,
-                dip_angle=0,
+                dip_angle=np.pi / 2,
                 major_axis=self.fracture_major_axes[2],
                 minor_axis=self.fracture_minor_axes[2],
                 major_axis_angle=0,
