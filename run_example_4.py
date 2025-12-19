@@ -138,16 +138,16 @@ if __name__ == "__main__":
         dt_min_max=(1, max(dt, pp.YEAR)),
         iter_max=20,
         iter_optimal_range=(5, 12),
-        iter_relax_factors=(0.5, 2.0),
+        iter_relax_factors=(0.6, 1.5),
         recomp_factor=0.2,
-        recomp_max=5,
+        recomp_max=10,
     )
     dt_init = 1e9  # * pp.YEAR
     time_manager_init = pp.TimeManager(
-        [0, 2 * dt_init],
+        [0, 5 * dt_init],
         dt_init=dt_init,
         dt_min_max=(1, 2 * dt_init),
-        constant_dt=True,
+        constant_dt=False,
     )
     fracture_size = 7e2
     cell_size = 12e2
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     # if fast:
     #     file_name += "_fast"
     model_params_init = {
-        "domain_size": 2.5e3,
+        "domain_size": 2.0e3,
         "material_constants": {
             "solid": pp.SolidConstants(**init_granodiorite_values),
             "fluid": pp.FluidComponent(**pp.fluid_values.water),
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         "grid_type": "simplex",
         "meshing_arguments": {
             "cell_size": cell_size,
-            "cell_size_fracture": 0.7 * fracture_size,
+            "cell_size_fracture": 0.6 * fracture_size,
         },
         "file_name": f"{file_name}_initialize",
         "data_folder_name": f"{file_name}_saved_data",
@@ -194,8 +194,8 @@ if __name__ == "__main__":
         "fracture_file": "coords.txt",
         "folder_name": folder_name,
         "initialization": True,
-        # "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
-        "lithostatic_stress_multipliers": np.array([0.92, 1.05, 1.0]),
+        "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
+        # "lithostatic_stress_multipliers": np.array([0.82, 1.25, 1.0]),
         "fracture_params": {  # Other options are available in the geometry mixin.
             "fracture_major_axes": np.array(
                 (fracture_size, fracture_size, fracture_size)
@@ -225,7 +225,7 @@ if __name__ == "__main__":
         {
             "time_manager": time_manager,
             "file_name": file_name,
-            "use_wells": False,
+            "use_wells": True,
             "reference_from_initial": True,
             "material_constants": {
                 "solid": pp.SolidConstants(**granodiorite_values),
@@ -239,9 +239,9 @@ if __name__ == "__main__":
     init_model = InitializationModel(model_params_init)
     solver_params = {
         "nl_convergence_tol_res": 1e-1,
-        "nl_convergence_tol": 5e-7,  # Seems to be the best we can do with current condition number
+        "nl_convergence_tol": 1e-5,  # Seems to be the best we can do with current condition number
         "nl_divergence_tol": 1e20,  # Seems to be the best we can do with current condition number
-        "max_iterations": 60,
+        "max_iterations": 40,
         "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
         "local_line_search": 1,
         "global_line_search": 0,
