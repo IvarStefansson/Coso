@@ -39,12 +39,15 @@ class CosoExporter:
                     self.units.convert_units(self.hydrostatic_pressure(depth), "Pa"),
                 )
             )
-        for sd, d in self.mdg.subdomains(return_data=True):
+        for sd in self.mdg.subdomains():
             if not self.is_well_grid(sd):
                 continue
-            if "open_well_cells" in d:
-                data.append((sd, "open_well_cells", d["open_well_cells"]))
-            well_tag = int(self.well_names[sd.tags["parent_well_index"]][:2])
+            if hasattr(self, "open_well_cells"):
+                vals = self.evaluate_and_scale([sd], "open_well_cells", "-")
+                data.append((sd, "open_well_cells", vals))
+
+            well = self.parent_well(sd)
+            well_tag = int(well.tags["well_name"][:2])
             data.append((sd, "well_name", np.full(sd.num_cells, well_tag)))
         return data
 
