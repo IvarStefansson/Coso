@@ -250,32 +250,26 @@ class WellDataConceptual(_WellDataBase):
         Parameters:
             subdomains: Subdomains where to open well cells.
         """
-        y = {
-            "68-20RD": np.array([0.0, 1.970]),
-            "16A-20": np.array([-1.0, 1.0]),
-        }
-        y = {name: self.units.convert_units(-z * pp.KILO, "m") for name, z in y.items()}
+        if len(subdomains) == 0:
+            return pp.ad.DenseArray(np.array([]), "open_well_cells")
         all_vals = []
         for sd in subdomains:
-            well = self.parent_well(sd)
-            assert well is not None, f"No well found for subdomain {sd}"
-            y_vals = y[well.tags["well_name"]]
-            ind = np.zeros(sd.num_cells, dtype=int)
-            where = np.logical_and(
-                sd.cell_centers[1, :] <= y_vals[0], sd.cell_centers[1, :] >= y_vals[1]
-            )
-            ind[where] = 1
-            sd.tags["open_well_cells"] = ind
-            all_vals.append(ind)
-        return pp.ad.DenseArray(np.hstack(all_vals))
-
-    def update_time_dependent_ad_arrays(self) -> None:
-        """Update time-dependent ad arrays."""
-        super().update_time_dependent_ad_arrays()
-        for sd, data in self.mdg.subdomains(return_data=True, dim=1):
             if not self.is_well_grid(sd):
-                continue
-            data["open_well_cells"] = self.set_open_well_cells(sd)
+                vals = np.ones(sd.num_cells, dtype=int)
+            else:
+                vals = self.set_open_well_cells(sd)
+            all_vals.append(vals)
+        all_vals = np.hstack(all_vals)
+        return pp.ad.DenseArray(all_vals, "open_well_cells")
+
+    # def update_time_dependent_ad_arrays(self) -> None:
+    #     """Update time-dependent ad arrays."""
+    #     super().update_time_dependent_ad_arrays()
+    #     for sd, data in self.mdg.subdomains(return_data=True):
+    #         if not self.is_well_grid(sd):
+    #             data["open_well_cells"] = np.ones(sd.num_cells, dtype=int)
+    #         else:
+    #             data["open_well_cells"] = self.set_open_well_cells(sd)
 
     def set_open_well_cells(self, sd) -> np.ndarray:
         """Open well cells in the given subdomains.
@@ -301,3 +295,26 @@ class WellDataConceptual(_WellDataBase):
             )
             ind[where] = 0
         return ind
+
+    def well_flux_equation(self, interfaces: list[pp.MortarGrid]) -> pp.ad.Operator:
+        """Equation relating the well flux to the difference between well and formation
+        pressure.
+
+        For details, see Lie: An introduction to reservoir simulation using MATLAB/GNU
+        Octave, 2019, Section 4.3.
+
+        Parameters:
+            interfaces: List of interfaces where the well fluxes are defined.
+
+        Returns:
+            Cell-wise well flux operator, units [kg * m^{nd-1} * s^-2].
+
+        """
+        eq = super().well_flux_equation(interfaces)
+        subdomains = self.interfaces_to_subdomains(interfaces)
+        projection = pp.ad.MortarProjections(self.mdg, subdomains, interfaces)
+        ind = projection.primary_to_mortar_avg() @ self.open_well_cells(subdomains)
+        new_eq = self.well_flux(interfaces) * (pp.ad.Scalar(1) - ind) + eq * ind
+        new_eq.set_name("well_flux_equation")
+
+        return new_eq
