@@ -258,8 +258,8 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         # Read well network from file.
         wells = []
         s = self.domain_size() / 3.0
-        x_prod = np.full((1, 3), 1.0)
-        y_prod = np.array([[1, 1, -1]])
+        x_prod = np.full((1, 3), -1.0)
+        y_prod = np.array([[2, 2, -1.5]])
         z_prod = np.array([[0, -3, -3]])
         pts_prod = np.vstack([x_prod, y_prod, z_prod]) * s
         # Create a well object.
@@ -267,7 +267,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
             pts_prod, tags={"well_name": self.production_well_names[0]}
         )  # 16a20
         wells.append(well_prod)
-        x_inj = np.full((1, 3), -1)
+        x_inj = np.full((1, 3), 1)
         y_inj = np.array([[2, 2, -1.5]])
         z_inj = np.array([[0, -3, -3]])
         pts_inj = np.vstack([x_inj, y_inj, z_inj]) * s
@@ -325,7 +325,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 num_points=num_points,
             )
         )
-        center_injection = s * np.array([0.9, 0, -3.0])
+        center_injection = s * np.array([0.7, 0, -3.0])
         # Create a single elliptic fracture
         self._fractures.append(
             pp.create_elliptic_fracture(
