@@ -325,7 +325,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 num_points=num_points,
             )
         )
-        center_injection = s * np.array([0.7, 0, -3.0])
+        center_injection = s * np.array([1.0, 0, -3.0])
         # Create a single elliptic fracture
         self._fractures.append(
             pp.create_elliptic_fracture(

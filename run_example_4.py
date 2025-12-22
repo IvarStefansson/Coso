@@ -207,7 +207,7 @@ if __name__ == "__main__":
         # "lithostatic_stress_multipliers": np.array([0.82, 1.25, 1.0]),
         "fracture_params": {  # Other options are available in the geometry mixin.
             "fracture_major_axes": np.array(
-                (fracture_size, fracture_size, 1.2 * fracture_size)
+                (fracture_size, fracture_size, 1.0 * fracture_size)
             ),
             # "num_points": np.array((9, 8)),  # Number of points to define each fracture
             # "dip_angles": np.array((np.pi / 4, np.pi / 2)),  # Slanted and vertical
