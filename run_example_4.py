@@ -158,7 +158,7 @@ if __name__ == "__main__":
         constant_dt=True,
     )
     fracture_size = 6e2
-    cell_size = 10e2
+    cell_size = 9e2
     if fast:
         cell_size = 2e3
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
@@ -189,7 +189,7 @@ if __name__ == "__main__":
         "grid_type": "simplex",
         "meshing_arguments": {
             "cell_size": cell_size,
-            "cell_size_fracture": 0.6 * fracture_size,
+            "cell_size_fracture": 0.5 * fracture_size,
         },
         "file_name": file_name,
         "data_folder_name": f"{file_name}_saved_data",
@@ -199,7 +199,7 @@ if __name__ == "__main__":
         #     temperature=300.0,
         #     pressure=pp.BAR,
         # ),
-        "thermal_gradient": 0.05,  # 73,  # K/m  tåltes ikke
+        "thermal_gradient": 0.06,  # 73,  # K/m  tåltes ikke
         "fracture_file": "coords.txt",
         "folder_name": folder_name_init,
         "initialization": True,
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     else:
         injection_pressures[0] = 1.5 * pp.MEGA * pp.PASCAL
 
-    production_pressures = np.full(schedule.shape, -1 * pp.MEGA * pp.PASCAL)  # Reduce
+    production_pressures = np.full(schedule.shape, -3 * pp.MEGA * pp.PASCAL)  # Reduce
     injection_temperatures = np.full(schedule.shape, 323.15)
     production_temperatures = np.full(schedule.shape, 373.15)
     # Can be refined to have different schedules for each well.
