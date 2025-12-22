@@ -226,7 +226,7 @@ if __name__ == "__main__":
         model_params[f"{name}_pressures"] = production_pressures
         model_params[f"{name}_temperatures"] = production_temperatures
 
-    granodiorite_values["friction_coefficient"] = 0.66  # Slightly too high? Compute
+    granodiorite_values["friction_coefficient"] = 0.67  # Slightly too high? Compute
     # from initialization model's final stress tendencies?
     model_params.update(
         {
