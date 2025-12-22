@@ -94,8 +94,10 @@ class CosoBoundaryConditionsDisplacement:
         if self.params["use_wells"]:
             coords = boundary_grid.cell_centers
             x_scaling = coords[0] - self.domain.bounding_box["xmin"]
+            y_scaling = coords[1] - self.domain.bounding_box["ymin"]
+
             offset_time = 0 * pp.YEAR if self.time_manager.time > 0 else 0
-            vals_time = np.outer(self.boundary_displacement_velocity, x_scaling) * (
+            vals_time = np.outer(self.boundary_displacement_velocity, y_scaling) * (
                 self.time_manager.time + offset_time
             )
             values += vals_time.ravel("F")
@@ -153,15 +155,15 @@ class CosoBoundaryConditionsDisplacement:
         management."""
         # The relative displacement rate is approx. 24 + 14 mm/year.
         # The area of the Coso Geothermal Field is 450 km2, which is 450e6 m2, so the
-        # displacement rate per unit length is 38e-3 m / sqrt(450e6 m/year.)
+        # displacement rate per unit length is 38e-3 m / sqrt(450e6) m/year.
         rate = (
             38
             * pp.MILLI
             * pp.METER
             / (450 * (pp.KILO * pp.METER) ** 2) ** 0.5
             / pp.YEAR
-        )
-        return np.array([1.0, 1.0, 0.0]) * self.units.convert_units(rate, "s^-1")
+        ) * 1000
+        return np.array([0.0, -1.0, 0.0]) * self.units.convert_units(rate, "s^-1")
 
 
 class CosoBoundaryConditions:
@@ -321,3 +323,67 @@ class CosoBoundaryConditions:
             #     darcy_flux = np.zeros_like(darcy_flux)
             vals[neumann_sides] = -darcy_flux[neumann_sides]
         return vals
+
+
+class NeumannWellBCsFromSchedule(pp.PorePyModel):
+    """Class defining Neumann BCs on well grids during the first time interval."""
+
+    def bc_type_darcy_flux(self, sd: pp.Grid) -> pp.BoundaryCondition:
+        """Return Neumann BC for Darcy flux on well grids during first time interval.
+
+        Parameters:
+            sd: The subdomain for which to return the BC type.
+
+        Returns:
+            The boundary condition type for Darcy flux on the given subdomain.
+        """
+        if self.is_well_grid(sd) and self.neumann_bcs_active():
+            # Before start of injection, impose Neumann BCs on well grids. A zero-flux
+            # condition is imposed by default when no BC values are specified. The <=
+            # comparison ensures that the BCs are kept as Neumann as long as the time
+            # step is within the first time interval [0, t1], where t1 is the start time
+            # of injection, consistent with the implicit time stepping employed in
+            # PorePy.
+            domain_sides = self.domain_boundary_sides(sd)
+            inds = domain_sides.top if self.nd == 3 else domain_sides.north
+            return pp.BoundaryCondition(sd, inds, "neu")
+        else:
+            return super().bc_type_darcy_flux(sd)  # type: ignore[misc]
+
+    def bc_type_fourier_flux(self, sd: pp.Grid) -> pp.BoundaryCondition:
+        """Return Neumann BC for Fourier flux on well grids during first time interval.
+
+        Parameters:
+            sd: The subdomain for which to return the BC type.
+
+        Returns:
+            The boundary condition type for Fourier flux on the given subdomain.
+        """
+        if self.is_well_grid(sd) and self.neumann_bcs_active():
+            # Before start of injection, impose Neumann BCs on well grids. A zero-flux
+            # condition is imposed by default when no BC values are specified. The <=
+            # comparison ensures that the BCs are kept as Neumann as long as the time
+            # step is within the first time interval [0, t1], where t1 is the start time
+            # of injection, consistent with the implicit time stepping employed in
+            # PorePy.
+            domain_sides = self.domain_boundary_sides(sd)
+            inds = domain_sides.top if self.nd == 3 else domain_sides.north
+            return pp.BoundaryCondition(sd, inds, "neu")
+        else:
+            return super().bc_type_fourier_flux(sd)  # type: ignore[misc]
+
+    def neumann_bcs_active(self) -> bool:
+        """Check if Neumann BCs on well grids are active.
+
+        Returns:
+            True if the current time is within the first time interval, False otherwise.
+        """
+        is_neumann = False
+        if self.params.get("neumann_intervals") is not None:
+            neumann_intervals = self.params["neumann_intervals"]
+            current_time = self.time_manager.time
+            for interval in neumann_intervals:
+                if interval[0] <= current_time <= interval[1]:
+                    is_neumann = True
+                    break
+        return is_neumann
