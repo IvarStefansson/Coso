@@ -132,18 +132,18 @@ if __name__ == "__main__":
     schedule = np.array(
         [
             0,
-            2 * dt,
-            pp.DAY,
-            pp.YEAR,
-            pp.YEAR + 2 * pp.DAY,
-            2 * pp.YEAR,
-            2 * pp.YEAR + 2 * pp.DAY,
+            2 * dt,  # Initial time steps with closed wells
+            pp.DAY,  # Ramp up to operation
+            pp.YEAR,  # First shut-in
+            pp.YEAR + 2 * pp.DAY,  # Restart operation
+            2 * pp.YEAR,  # Second shut-in
+            2 * pp.YEAR + 2 * pp.DAY,  # End second shut-in and end of simulation
         ]
     )
     neumann_intervals = [
-        (-1.0, schedule[1]),
-        (schedule[3], schedule[4]),
-        (schedule[-2], schedule[-1]),
+        (-1.0, schedule[1]),  # Close wells initially
+        (schedule[3], schedule[4]),  # Shut-in period 1
+        (schedule[-2], schedule[-1]),  # Shut-in period 2
     ]
     # schedule += injection_start_time
     # Add the initial time step to the schedule
