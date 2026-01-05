@@ -49,11 +49,11 @@ class CopyInitialCondition:
         if isinstance(self, pp.Poromechanics):
             # Add contribution from pressure
             p = mod.perturbation_from_reference("pressure", sds)
-            u_faces_ad += discr.bound_displacement_pressure(mod.darcy_keyword) @ p
+            u_faces_ad += discr.bound_pressure(mod.darcy_keyword) @ p
         if isinstance(self, pp.Thermoporomechanics):
             # Add contribution from temperature
-            T = mod.perturbation_from_reference("temperature", sds)  # Krymper uten.
-            u_faces_ad += discr.bound_displacement_pressure(mod.enthalpy_keyword) @ T
+            T = mod.perturbation_from_reference("temperature", sds)
+            u_faces_ad += discr.bound_pressure(mod.enthalpy_keyword) @ T
         u_faces = mod.equation_system.evaluate(u_faces_ad)
         assert isinstance(u_faces, np.ndarray)
         return boundary_grid.projection(nd=self.nd) @ u_faces.ravel("F")
