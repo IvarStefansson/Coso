@@ -9,6 +9,108 @@ import os
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+from porepy.applications.convergence_analysis import ConvergenceAnalysis
+
+
+def plot_flow_rate_and_fracture_displacement(
+    csv_dir: str = "example_4_saved_data/well_monitoring",
+    well_name: str = "16A-20",
+) -> None:
+    """
+    Plot fluid flux from production well and displacement jump of first two fractures.
+
+    This function creates a plot with two y-axes:
+    - Left axis: fluid_flux (kg/s) from the production well vs time
+    - Right axis: displacement_jump (m) for the first two fractures vs time
+
+    Parameters:
+    -----------
+    csv_dir : str
+        Path to directory containing the CSV files
+    well_name : str
+        Name of the production well to plot (default: "16A-20")
+    """
+    # Read CSV files
+    well_data = pd.read_csv(os.path.join(csv_dir, "example_4.csv"))
+    fracture_data = pd.read_csv(os.path.join(csv_dir, "example_4_fractures.csv"))
+
+    # Process well data
+    well_data_filtered = well_data[well_data["well_name"] == well_name].copy()
+
+    # Parse fluid_flux - it's stored as string like "[-0.]" or "[value]"
+    well_data_filtered["fluid_flux_numeric"] = well_data_filtered["fluid_flux"].apply(
+        lambda x: float(str(x).strip("[]"))
+    )
+
+    # Dynamically get the first two unique fracture IDs, preserving order of first occurrence
+    fracture_ids = fracture_data["fracture_id"].unique()[:2].tolist()
+    fracture_data_filtered = fracture_data[
+        fracture_data["fracture_id"].isin(fracture_ids)
+    ].copy()
+
+    # Create figure with two y-axes
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # Plot fluid flux on left axis
+    color1 = "tab:blue"
+    ax1.set_xlabel("Time (s)", fontsize=12)
+    ax1.set_ylabel("Fluid Flux (kg/s)", color=color1, fontsize=12)
+    line1 = ax1.plot(
+        well_data_filtered["time"],
+        well_data_filtered["fluid_flux_numeric"],
+        color=color1,
+        linewidth=2,
+        label=f"Fluid Flux ({well_name})",
+    )
+    ax1.tick_params(axis="y", labelcolor=color1)
+
+    # Create right axis for fracture displacement
+    ax2 = ax1.twinx()
+    color2 = "tab:orange"
+    color3 = "tab:green"
+    ax2.set_ylabel("Displacement Jump (m)", fontsize=12)
+
+    # Plot displacement jump for each fracture
+    for fracture_id, color in zip(fracture_ids, [color2, color3]):
+        fracture_subset = fracture_data_filtered[
+            fracture_data_filtered["fracture_id"] == fracture_id
+        ].sort_values("time")
+        ax2.plot(
+            fracture_subset["time"],
+            fracture_subset["displacement_jump"],
+            color=color,
+            linewidth=2,
+            marker="o",
+            markersize=4,
+            label=f"Displacement Jump {fracture_id}",
+        )
+
+    ax2.tick_params(axis="y")
+
+    # Create combined legend
+    lines1 = line1
+    lines2 = ax2.get_lines()
+    ax1.legend(
+        lines1 + lines2,
+        [l.get_label() for l in lines1 + lines2],
+        loc="lower right",
+        fontsize=10,
+        framealpha=0.9,
+        edgecolor="black",
+    )
+
+    plt.title(
+        "Production Well Fluid Flux and Fracture Displacement Jump vs Time",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.tight_layout()
+    # Save the plot
+    output_path = os.path.join(csv_dir, "flow_rate_displacement_plot.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Plot saved to: {output_path}")
+
+    return fig
 
 
 class CosoExporter:
@@ -100,7 +202,9 @@ class CosoExporter:
         if not hasattr(self, "_data_collection_times"):
             self._data_collection_times = []
         self._data_collection_times.append(self.time_manager.time)
-        data = {}
+        data = super().collect_data()
+        if data is None:
+            data = {}
         sds = self.mdg.subdomains(dim=self.nd - 2)
         face_offsets = np.cumsum([0] + [sd.num_faces for sd in sds])
         pressure = self.evaluate_and_scale(sds, "pressure_trace", "Pa")
@@ -149,7 +253,17 @@ class CosoExporter:
                         * flux_sign,
                     }
                 )
-
+        fracs = self.mdg.subdomains(dim=self.nd - 1)
+        cell_offsets = np.cumsum([0] + [sd.num_cells for sd in fracs])
+        displacement_jump = self.evaluate_and_scale(fracs, "displacement_jump", "m")
+        for id, sd in enumerate(fracs):
+            key = "fracture_" + str(id)
+            data[key] = {
+                "displacement_jump": ConvergenceAnalysis.lp_norm(
+                    displacement_jump[cell_offsets[id] : cell_offsets[id + 1]],
+                    fracs[id].cell_volumes,
+                )
+            }
         return data
 
     def save_results(self) -> None:
@@ -157,13 +271,19 @@ class CosoExporter:
 
         The results are saved in a CSV file in the specified folder. The file contains
         time, well name, and the monitored variables."""
-        records = []
+        well_records = []
+        fracture_records = []
         for time, data in zip(self._data_collection_times, self.results):
-            for well_name, variables in data.items():
-                record = {"time": time, "well_name": well_name}
-                record.update(variables)
-                records.append(record)
-        df = pd.DataFrame(records)
+            for name, variables in data.items():
+                if name.startswith("fracture_"):
+                    record = {"time": time, "fracture_id": name}
+                    record.update(variables)
+                    fracture_records.append(record)
+                else:
+                    record = {"time": time, "well_name": name}
+                    record.update(variables)
+                    well_records.append(record)
+        df = pd.DataFrame(well_records)
         folder_name = self.params["data_folder_name"] + "/well_monitoring"
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)
@@ -171,7 +291,13 @@ class CosoExporter:
             f"{folder_name}/{self.params['file_name']}.csv",
             index=False,
         )
+        df_fractures = pd.DataFrame(fracture_records)
+        df_fractures.to_csv(
+            f"{folder_name}/{self.params['file_name']}_fractures.csv",
+            index=False,
+        )
         self.well_monitoring_data = df
+        self.fracture_monitoring_data = df_fractures
 
     def plot_well_monitoring(self) -> None:
         """Plot well monitoring data for a given well."""
@@ -248,6 +374,10 @@ class CosoExporter:
                     f"{self.params['data_folder_name']}/well_monitoring/"
                     + f"{self.params['file_name']}_{plt_name}{suffix}.png"
                 )
+        plot_flow_rate_and_fracture_displacement(
+            csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
+            well_name=self.production_well_names[0],
+        )
 
 
 class GeometryExporting:
