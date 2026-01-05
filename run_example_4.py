@@ -122,21 +122,29 @@ if __name__ == "__main__":
     fast = 1 == 11  # Set to 1 for fast run, 0 for full run
     # Define the time parameters
     logger.info("Starting the simulation")
-    dt = 2e2
+    dt = 5e1
     # injection_start_time = 10e3
     # Include dt to make sure itis included in the time steps which are exported.
     schedule = np.array([0, 1, 10, 20, 50, 80, 111, 112, 113, 114, 115, 116]) * pp.DAY
     schedule = np.array(
         [0, 2 * dt, pp.DAY, 100 * pp.DAY, 102 * pp.DAY, 200 * pp.DAY, 202 * pp.DAY]
     )
+    schedule = np.array(
+        [
+            0,
+            2 * dt,
+            pp.DAY,
+            pp.YEAR,
+            pp.YEAR + 2 * pp.DAY,
+            2 * pp.YEAR,
+            2 * pp.YEAR + 2 * pp.DAY,
+        ]
+    )
     neumann_intervals = [
-        (schedule[0], schedule[1]),
-        (schedule[2], schedule[3]),
+        (-1.0, schedule[1]),
+        (schedule[3], schedule[4]),
         (schedule[-2], schedule[-1]),
     ]
-    if fast:
-        injection_start_time = 10  # 0.2 * pp.YEAR
-        schedule = np.arange(2) * 10.0  # pp.HOUR
     # schedule += injection_start_time
     # Add the initial time step to the schedule
     # schedule = np.insert(schedule, 0, 0)  # Initial time step at 0
@@ -162,21 +170,10 @@ if __name__ == "__main__":
     if fast:
         cell_size = 2e3
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
-    # init_granodiorite_values.update(
-    #     {
-    #         "maximum_elastic_fracture_opening": 0.0,
-    #         "dilation_angle": 0.0,
-    #         "permeability": 1e-10,
-    #         "thermal_conductivity": 1e5,
-    #         "residual_aperture": 1e-0,
-    #     }
-    # )
+
     folder_name = "conceptual"
     folder_name_init = folder_name + "_initialization"
-    fracture_shift_distance = 0  # Must be int for filename formatting
     file_name = "example_4"
-    # if fast:
-    #     file_name += "_fast"
     model_params_init = {
         "domain_size": 2.0e3,
         "material_constants": {
@@ -199,12 +196,12 @@ if __name__ == "__main__":
         #     temperature=300.0,
         #     pressure=pp.BAR,
         # ),
-        "thermal_gradient": 0.06,  # 73,  # K/m  tåltes ikke
+        "thermal_gradient": 5e-2,  # 73,  # K/m  tåltes ikke
         "fracture_file": "coords.txt",
         "folder_name": folder_name_init,
         "initialization": True,
         "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
-        # "lithostatic_stress_multipliers": np.array([0.82, 1.25, 1.0]),
+        # "lithostatic_stress_multipliers": np.array([1.0, 1.0, 1.0]),
         "fracture_params": {  # Other options are available in the geometry mixin.
             "fracture_major_axes": np.array(
                 (fracture_size, fracture_size, 1.0 * fracture_size)
@@ -267,7 +264,7 @@ if __name__ == "__main__":
         (3, -1), order="F"
     )
     friction_coeff = (
-        np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + 0.01
+        np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + 0.02
     )
     granodiorite_values["friction_coefficient"] = friction_coeff
     model_params.update(
@@ -283,6 +280,7 @@ if __name__ == "__main__":
                 # "numerical": pp.NumericalConstants(characteristic_displacement=1e0),  # type: ignore[arg-type]
             },
             "neumann_intervals": neumann_intervals,
+            "production_well_z_endpoint": 0.0,  # -1.5,
         }
     )
     model = MainModel(model_params)  # Load from initialization from file

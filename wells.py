@@ -279,7 +279,7 @@ class WellDataConceptual(_WellDataBase):
         """
         z = {
             "68-20RD": np.array([1.1, 0]),
-            "16A-20": np.array([1.1, 0.0]),
+            "16A-20": np.array([0.0, -1.1]),
             "16B-20": np.array([2.484, 3.196]),
         }
         z = {name: self.units.convert_units(z * pp.KILO, "m") for name, z in z.items()}

@@ -259,7 +259,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         wells = []
         s = self.domain_size() / 3.0
         x_prod = np.full((1, 3), -1.0)
-        y_prod = np.array([[2, 2, -1.5]])
+        y_prod = np.array([[2, 2, self.params.get("production_well_z_endpoint", -1.5)]])
         z_prod = np.array([[0, -3, -3]])
         pts_prod = np.vstack([x_prod, y_prod, z_prod]) * s
         # Create a well object.
