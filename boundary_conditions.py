@@ -154,15 +154,8 @@ class CosoBoundaryConditionsDisplacement:
         to provide geothermal operators with tools that can be used in reservoir
         management."""
         # The relative displacement rate is approx. 24 + 14 mm/year.
-        # The area of the Coso Geothermal Field is 450 km2, which is 450e6 m2, so the
-        # displacement rate per unit length is 38e-3 m / sqrt(450e6) m/year.
-        rate = (
-            38
-            * pp.MILLI
-            * pp.METER
-            / (450 * (pp.KILO * pp.METER) ** 2) ** 0.5
-            / pp.YEAR
-        ) * 1000
+        # The side length of the Coso Geothermal Field is roughly 10 km.
+        rate = (38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR) * 1000
         return np.array([0.0, -1.0, 0.0]) * self.units.convert_units(rate, "s^-1")
 
 
@@ -383,7 +376,7 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
             neumann_intervals = self.params["neumann_intervals"]
             current_time = self.time_manager.time
             for interval in neumann_intervals:
-                if interval[0] <= current_time <= interval[1]:
+                if interval[0] < current_time <= interval[1]:
                     is_neumann = True
                     break
         return is_neumann
