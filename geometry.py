@@ -300,7 +300,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         center = s * np.array([-1.0, 1.0, -3.0])
 
         # Create a single elliptic fracture
-        num_points = 12
+        num_points = 15
         self._fractures = [
             pp.create_elliptic_fracture(
                 center=center,

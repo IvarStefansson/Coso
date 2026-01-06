@@ -122,7 +122,7 @@ if __name__ == "__main__":
     fast = 1 == 11  # Set to 1 for fast run, 0 for full run
     # Define the time parameters
     logger.info("Starting the simulation")
-    dt = 1e2
+    dt = 5e1
     # injection_start_time = 10e3
     # Include dt to make sure itis included in the time steps which are exported.
     schedule = np.array([0, 1, 10, 20, 50, 80, 111, 112, 113, 114, 115, 116]) * pp.DAY
@@ -166,7 +166,7 @@ if __name__ == "__main__":
         constant_dt=True,
     )
     fracture_size = 6e2
-    cell_size = 10e2
+    cell_size = 9e2
     if fast:
         cell_size = 2e3
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
@@ -237,7 +237,7 @@ if __name__ == "__main__":
         "nl_convergence_tol_res": 1e-1,
         "nl_convergence_tol": 1e-4,
         "nl_divergence_tol": 1e20,
-        "max_iterations": 40,
+        "max_iterations": 30,
         "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
         "local_line_search": 1,
         "global_line_search": 0,

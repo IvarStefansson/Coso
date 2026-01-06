@@ -41,7 +41,18 @@ def plot_flow_rate_and_fracture_displacement(
     well_data_filtered["fluid_flux_numeric"] = well_data_filtered["fluid_flux"].apply(
         lambda x: float(str(x).strip("[]"))
     )
-
+    time = well_data_filtered["time"]
+    # Process time data. Times may not be strictly monotonic. This is due to saving of
+    # diverged time steps. We sort the data by time to ensure correct plotting.
+    # Identify non-monotonic times.
+    accepted_times = [time.iloc[0]]
+    inds = [0]
+    for i, t in enumerate(time.iloc[1:], start=1):
+        if t > accepted_times[-1]:
+            accepted_times.append(t)
+            inds.append(i)
+    time = pd.Series(accepted_times)
+    well_data_filtered = well_data_filtered.iloc[inds].reset_index(drop=True)
     # Dynamically get the first two unique fracture IDs, preserving order of first occurrence
     fracture_ids = fracture_data["fracture_id"].unique()[:2].tolist()
     fracture_data_filtered = fracture_data[
@@ -56,7 +67,7 @@ def plot_flow_rate_and_fracture_displacement(
     ax1.set_xlabel("Time (s)", fontsize=12)
     ax1.set_ylabel("Fluid Flux (kg/s)", color=color1, fontsize=12)
     line1 = ax1.plot(
-        well_data_filtered["time"],
+        time,
         well_data_filtered["fluid_flux_numeric"],
         color=color1,
         linewidth=2,
@@ -69,20 +80,21 @@ def plot_flow_rate_and_fracture_displacement(
     color2 = "tab:orange"
     color3 = "tab:green"
     ax2.set_ylabel("Displacement Jump (m)", fontsize=12)
-
+    fracture_mapping = {fracture_ids[0]: "not connected", fracture_ids[1]: "connected"}
     # Plot displacement jump for each fracture
     for fracture_id, color in zip(fracture_ids, [color2, color3]):
         fracture_subset = fracture_data_filtered[
             fracture_data_filtered["fracture_id"] == fracture_id
         ].sort_values("time")
+        fracture_subset = fracture_subset.iloc[inds].reset_index(drop=True)
         ax2.plot(
-            fracture_subset["time"],
+            time,
             fracture_subset["displacement_jump"],
             color=color,
             linewidth=2,
             marker="o",
             markersize=4,
-            label=f"Displacement Jump {fracture_id}",
+            label=f"Displacement Jump on fracture {fracture_id} ({fracture_mapping[fracture_id]})",
         )
 
     ax2.tick_params(axis="y")
@@ -93,7 +105,7 @@ def plot_flow_rate_and_fracture_displacement(
     ax1.legend(
         lines1 + lines2,
         [l.get_label() for l in lines1 + lines2],
-        loc="lower right",
+        loc="best",
         fontsize=10,
         framealpha=0.9,
         edgecolor="black",
@@ -413,3 +425,7 @@ class GeometryExporting:
             collected_data = self.collect_data()
             if collected_data is not None:
                 self.results.append(collected_data)
+
+
+if __name__ == "__main__":
+    plot_flow_rate_and_fracture_displacement()
