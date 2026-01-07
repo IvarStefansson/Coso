@@ -219,6 +219,9 @@ def time_managers(schedule: np.ndarray, dt: float, production_period: float):
     return time_manager, time_manager_init
 
 
+use_iterative_solver = True
+
+
 if __name__ == "__main__":
     tp = True
     copy_plots = True
@@ -366,7 +369,16 @@ if __name__ == "__main__":
                     # "linear_solver": "scipy_sparse",
                 }
 
-                init_model = InitializationModel(model_params_init)
+                initialization_class = InitializationModel
+                if use_iterative_solver:
+                    initialization_class = add_mixin(
+                        pp_solvers.IterativeSolverMixin, InitializationModel
+                    )
+                    model_params_init["linear_solver"] = {
+                        "preconditioner_factory": pp_solvers.thm_factory
+                    }
+
+                init_model = initialization_class(model_params_init)
 
                 pp.run_time_dependent_model(init_model, solver_params)
                 # Analyze the initialization results to set friction coefficient
@@ -403,7 +415,14 @@ if __name__ == "__main__":
                         "production_well_y_endpoint": well_endpoint,
                     }
                 )
-                model = MainModel(model_params)
+                model_class = MainModel
+                if use_iterative_solver:
+                    model_class = add_mixin(pp_solvers.IterativeSolverMixin, MainModel)
+                    model_params["linear_solver"] = {
+                        "preconditioner_factory": pp_solvers.thm_factory
+                    }
+
+                model = model_class(model_params)  # Load from initialization from file
                 model.initialization_model = init_model
                 solver_params.update(
                     {
