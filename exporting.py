@@ -45,9 +45,11 @@ def plot_flow_rate_and_fracture_displacement(
     # Process time data. Times may not be strictly monotonic. This is due to saving of
     # diverged time steps. We sort the data by time to ensure correct plotting.
     # Identify non-monotonic times.
-    accepted_times = [time.iloc[0]]
-    inds = [0]
-    for i, t in enumerate(time.iloc[1:], start=1):
+
+    i0 = 2
+    accepted_times = [time.iloc[i0]]
+    inds = [i0]
+    for i, t in enumerate(time.iloc[i0:], start=i0):
         if t > accepted_times[-1]:
             accepted_times.append(t)
             inds.append(i)
@@ -87,7 +89,7 @@ def plot_flow_rate_and_fracture_displacement(
             fracture_data_filtered["fracture_id"] == fracture_id
         ].sort_values("time")
         fracture_subset = fracture_subset.iloc[inds].reset_index(drop=True)
-        ax2.plot(
+        ax2.semilogy(
             time,
             fracture_subset["displacement_jump"],
             color=color,
@@ -267,12 +269,15 @@ class CosoExporter:
                 )
         fracs = self.mdg.subdomains(dim=self.nd - 1)
         cell_offsets = np.cumsum([0] + [sd.num_cells for sd in fracs])
-        displacement_jump = self.evaluate_and_scale(fracs, "displacement_jump", "m")
+        displacement_jump = self.evaluate_and_scale(
+            fracs, "displacement_jump", "m"
+        ).reshape((self.nd, -1), order="F")
+        jump_norm = np.linalg.norm(displacement_jump, axis=0)
         for id, sd in enumerate(fracs):
             key = "fracture_" + str(id)
             data[key] = {
                 "displacement_jump": ConvergenceAnalysis.lp_norm(
-                    displacement_jump[cell_offsets[id] : cell_offsets[id + 1]],
+                    jump_norm[cell_offsets[id] : cell_offsets[id + 1]],
                     fracs[id].cell_volumes,
                 )
             }

@@ -139,7 +139,7 @@ if __name__ == "__main__":
     time_manager = pp.TimeManager(
         schedule=schedule,
         dt_init=dt,
-        dt_min_max=(1e-2, max(dt, pp.YEAR)),
+        dt_min_max=(1e-2, max(dt, pp.YEAR / 4)),
         iter_max=20,
         iter_optimal_range=(5, 12),
         iter_relax_factors=(0.6, 1.8),
@@ -158,10 +158,11 @@ if __name__ == "__main__":
     if fast:
         cell_size = 2e3
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
-
-    folder_name = "conceptual"
+    suffix = "_long_well"
+    suffix = ""
+    folder_name = "conceptual" + suffix
     folder_name_init = folder_name + "_initialization"
-    file_name = "example_4"
+    file_name = "example_4" + suffix
     model_params_init = {
         "domain_size": 2.0e3,
         "material_constants": {
@@ -177,7 +178,7 @@ if __name__ == "__main__":
             "cell_size_fracture": 0.7 * fracture_size,
         },
         "file_name": file_name,
-        "data_folder_name": f"{file_name}_saved_data",
+        "data_folder_name": f"{folder_name}_saved_data",
         "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
         "use_wells": False,
         "reference_variable_values": pp.ReferenceVariableValues(
@@ -198,8 +199,6 @@ if __name__ == "__main__":
             # "dip_angles": np.array((np.pi / 4, np.pi / 2)),  # Slanted and vertical
         },
     }
-    if fast:
-        model_params_init["data_folder_name"] = "saved_data_fast_runs"
     model_params = copy.deepcopy(model_params_init)
     # Reduce target pressure in favour of displacement BC as driving force?
     injection_pressures = np.full(schedule.shape, 10 * pp.MEGA * pp.PASCAL)
@@ -271,6 +270,8 @@ if __name__ == "__main__":
             "production_well_z_endpoint": 0.0,  # -1.5,
         }
     )
+    if "long" in folder_name:
+        model_params["production_well_z_endpoint"] = -1.5
     model = MainModel(model_params)  # Load from initialization from file
     model.initialization_model = init_model
     solver_params.update(
