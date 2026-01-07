@@ -279,7 +279,7 @@ class WellDataConceptual(_WellDataBase):
         """
         z = {
             "68-20RD": np.array([1.1, 0]),
-            "16A-20": np.array([0.0, -1.1]),
+            "16A-20": np.array([-5.0, -2.1]),
             "16B-20": np.array([2.484, 3.196]),
         }
         z = {name: self.units.convert_units(z * pp.KILO, "m") for name, z in z.items()}
@@ -296,25 +296,25 @@ class WellDataConceptual(_WellDataBase):
             ind[where] = 0
         return ind
 
-    def well_flux_equation(self, interfaces: list[pp.MortarGrid]) -> pp.ad.Operator:
-        """Equation relating the well flux to the difference between well and formation
-        pressure.
+    # def well_flux_equation(self, interfaces: list[pp.MortarGrid]) -> pp.ad.Operator:
+    #     """Equation relating the well flux to the difference between well and formation
+    #     pressure.
 
-        For details, see Lie: An introduction to reservoir simulation using MATLAB/GNU
-        Octave, 2019, Section 4.3.
+    #     For details, see Lie: An introduction to reservoir simulation using MATLAB/GNU
+    #     Octave, 2019, Section 4.3.
 
-        Parameters:
-            interfaces: List of interfaces where the well fluxes are defined.
+    #     Parameters:
+    #         interfaces: List of interfaces where the well fluxes are defined.
 
-        Returns:
-            Cell-wise well flux operator, units [kg * m^{nd-1} * s^-2].
+    #     Returns:
+    #         Cell-wise well flux operator, units [kg * m^{nd-1} * s^-2].
 
-        """
-        eq = super().well_flux_equation(interfaces)
-        subdomains = self.interfaces_to_subdomains(interfaces)
-        projection = pp.ad.MortarProjections(self.mdg, subdomains, interfaces)
-        ind = projection.primary_to_mortar_avg() @ self.open_well_cells(subdomains)
-        new_eq = self.well_flux(interfaces) * (pp.ad.Scalar(1) - ind) + eq * ind
-        new_eq.set_name("well_flux_equation")
+    #     """
+    #     eq = super().well_flux_equation(interfaces)
+    #     subdomains = self.interfaces_to_subdomains(interfaces)
+    #     projection = pp.ad.MortarProjections(self.mdg, subdomains, interfaces)
+    #     ind = projection.primary_to_mortar_avg() @ self.open_well_cells(subdomains)
+    #     new_eq = self.well_flux(interfaces) * (pp.ad.Scalar(1) - ind) + eq * ind
+    #     new_eq.set_name("well_flux_equation")
 
-        return new_eq
+    #     return new_eq

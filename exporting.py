@@ -280,6 +280,7 @@ class CosoExporter:
                     jump_norm[cell_offsets[id] : cell_offsets[id + 1]],
                     fracs[id].cell_volumes,
                 )
+                / np.sum(fracs[id].cell_volumes),
             }
         return data
 

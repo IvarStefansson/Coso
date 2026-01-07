@@ -159,7 +159,7 @@ if __name__ == "__main__":
         cell_size = 2e3
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
     suffix = "_long_well"
-    suffix = ""
+    # suffix = ""
     folder_name = "conceptual" + suffix
     folder_name_init = folder_name + "_initialization"
     file_name = "example_4" + suffix
