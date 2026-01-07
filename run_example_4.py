@@ -1,4 +1,3 @@
-from typing import Any, Callable
 import porepy as pp
 import numpy as np
 from geometry import ConceptualGeometry
@@ -6,11 +5,9 @@ from material_parameters import granodiorite_values
 
 from physical_model import PhysicalModel
 from boundary_conditions import (
-    CosoBoundaryConditions,
     CosoBoundaryConditionsDisplacement,
     NeumannWellBCsFromSchedule,
 )
-from porepy.examples.geothermal_reservoir import WellBoundaryConditions
 
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
     BoundaryConditionsMechanicsNeumann,
@@ -32,7 +29,7 @@ from porepy.viz.data_saving_model_mixin import (
     ResidualExporting,
 )
 from solution_strategy import SolutionStrategy
-from initial_conditions import InitialConditionFromDepth, CopyInitialCondition
+from initial_conditions import CopyInitialCondition
 from exporting import CosoExporter, GeometryExporting
 from wells import WellDataConceptual
 from porepy.numerics.nonlinear import line_search
@@ -62,7 +59,8 @@ class BaseModel(
     GeometryExporting,
     CosoExporter,
     ConceptualGeometry,
-    # diff_tpfa.DarcysLawAdInLowerDimensions,
+    # pp.poromechanics.TpsaPoromechanicsMixin,
+    # diff_tpfa.DarcysLawAdEverywhere,
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
     pp.models.solution_strategy.ContactIndicators,
@@ -99,16 +97,6 @@ class MainModel(
 ):
     """Main model for the Coso geothermal reservoir."""
 
-    # class CombinedModel(
-    #         InitialConditionHydrostaticPressureValues,
-    #     InitialConditionThermalGradientTemperatureValues,
-    #     BoundaryConditionsMechanicsNeumann,
-    #     LithostaticBoundaryStressValues,
-    #     BaseModel,
-
-    # ):
-    """Combined model for the Coso geothermal reservoir."""
-
 
 class ConstraintLineSearchNonlinearSolver(
     line_search.ConstraintLineSearch,
@@ -122,7 +110,7 @@ if __name__ == "__main__":
     fast = 1 == 11  # Set to 1 for fast run, 0 for full run
     # Define the time parameters
     logger.info("Starting the simulation")
-    dt = 5e1
+    dt = 3e1
     # injection_start_time = 10e3
     # Include dt to make sure itis included in the time steps which are exported.
     schedule = np.array([0, 1, 10, 20, 50, 80, 111, 112, 113, 114, 115, 116]) * pp.DAY
@@ -133,7 +121,7 @@ if __name__ == "__main__":
         [
             0,
             2 * dt,  # Initial time steps with closed wells
-            pp.DAY,  # Ramp up to operation
+            # pp.DAY,  # Ramp up to operation
             pp.YEAR,  # First shut-in
             pp.YEAR + 2 * pp.DAY,  # Restart operation
             2 * pp.YEAR,  # Second shut-in
@@ -141,8 +129,8 @@ if __name__ == "__main__":
         ]
     )
     neumann_intervals = [
-        (-1.0, schedule[1]),  # Close wells initially
-        (schedule[3], schedule[4]),  # Shut-in period 1
+        # (-1.0, schedule[1]),  # Close wells initially Skip this?
+        (schedule[2], schedule[3]),  # Shut-in period 1
         (schedule[-2], schedule[-1]),  # Shut-in period 2
     ]
     # schedule += injection_start_time
@@ -151,10 +139,10 @@ if __name__ == "__main__":
     time_manager = pp.TimeManager(
         schedule=schedule,
         dt_init=dt,
-        dt_min_max=(1, max(dt, pp.YEAR)),
+        dt_min_max=(1e-2, max(dt, pp.YEAR)),
         iter_max=20,
         iter_optimal_range=(5, 12),
-        iter_relax_factors=(0.6, 1.5),
+        iter_relax_factors=(0.6, 1.8),
         recomp_factor=0.2,
         recomp_max=10,
     )
@@ -166,7 +154,7 @@ if __name__ == "__main__":
         constant_dt=True,
     )
     fracture_size = 6e2
-    cell_size = 9e2
+    cell_size = 8e2
     if fast:
         cell_size = 2e3
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
@@ -192,10 +180,10 @@ if __name__ == "__main__":
         "data_folder_name": f"{file_name}_saved_data",
         "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
         "use_wells": False,
-        # "reference_variable_values": pp.ReferenceVariableValues(
-        #     temperature=300.0,
-        #     pressure=pp.BAR,
-        # ),
+        "reference_variable_values": pp.ReferenceVariableValues(
+            temperature=300.0,
+            #     pressure=pp.BAR,
+        ),
         "thermal_gradient": 5e-2,  # 73,  # K/m  tåltes ikke
         "fracture_file": "coords.txt",
         "folder_name": folder_name_init,
@@ -215,13 +203,13 @@ if __name__ == "__main__":
     model_params = copy.deepcopy(model_params_init)
     # Reduce target pressure in favour of displacement BC as driving force?
     injection_pressures = np.full(schedule.shape, 10 * pp.MEGA * pp.PASCAL)
-    if issubclass(MainModel, NeumannWellBCsFirstTimeInterval):
-        injection_pressures[0] = 2.0 * pp.MEGA * pp.PASCAL
-        injection_pressures[1] = 3.0 * pp.MEGA * pp.PASCAL
-    else:
-        injection_pressures[0] = 1.5 * pp.MEGA * pp.PASCAL
+    # if issubclass(MainModel, NeumannWellBCsFirstTimeInterval):
+    #     injection_pressures[0] = 2.0 * pp.MEGA * pp.PASCAL
+    #     injection_pressures[1] = 3.0 * pp.MEGA * pp.PASCAL
+    # else:
+    injection_pressures[0] = 5 * pp.MEGA * pp.PASCAL
 
-    production_pressures = np.full(schedule.shape, -3 * pp.MEGA * pp.PASCAL)  # Reduce
+    production_pressures = np.full(schedule.shape, -1 * pp.MEGA * pp.PASCAL)  # Reduce
     injection_temperatures = np.full(schedule.shape, 323.15)
     production_temperatures = np.full(schedule.shape, 373.15)
     # Can be refined to have different schedules for each well.

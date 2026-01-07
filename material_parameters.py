@@ -38,7 +38,7 @@ granodiorite_values = {
         bulk_modulus_granodiorite, youngs_modulus_granodiorite
     ),
     "biot_coefficient": 0.5,  # TODO: Find a reference and a value
-    "dilation_angle": 0.2,  # TODO: Find a reference and a value
+    "dilation_angle": 0.1,  # TODO: Find a reference and a value
     "permeability": 5e-15,  # [2], p. 1
     "fracture_gap": 0e-4,  # TODO: Find a reference and a value
     "residual_aperture": 1e-3,  # TODO: Find a reference and a value

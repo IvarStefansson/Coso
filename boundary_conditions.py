@@ -156,7 +156,7 @@ class CosoBoundaryConditionsDisplacement:
         # The relative displacement rate is approx. 24 + 14 mm/year.
         # The side length of the Coso Geothermal Field is roughly 10 km.
         # rate = (38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR) * 1000
-        rate = 5000 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR
+        rate = 1500 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR
         return np.array([0.0, -1.0, 0.0]) * self.units.convert_units(rate, "s^-1")
 
 
