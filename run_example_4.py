@@ -432,6 +432,7 @@ if __name__ == "__main__":
                     model_params["linear_solver"] = {
                         "preconditioner_factory": pp_solvers.thm_factory
                     }
+                    model_params["linear_solver"]["options"] = linear_solver_params
 
                 model = model_class(model_params)  # Load from initialization from file
                 model.initialization_model = init_model
