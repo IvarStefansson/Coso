@@ -377,6 +377,17 @@ if __name__ == "__main__":
                     model_params_init["linear_solver"] = {
                         "preconditioner_factory": pp_solvers.thm_factory
                     }
+                    linear_solver_params = {
+                        "mechanics": {
+                            "pc_hypre_boomeramg_strong_threshold": 0.9,
+                            "pc_hypre_boomeramg_smooth_type": "ilu",
+                            "pc_hypre_boomeramg_ilu_level": 1,
+                            "pc_hypre_boomeramg_ilu_drop_tol": 1e-5,
+                        },
+                        "identity": {"pc_type": "ilu"},
+                        "ksp_monitor": None,
+                    }
+                    model_params_init["linear_solver"]["options"] = linear_solver_params
 
                 init_model = initialization_class(model_params_init)
 
