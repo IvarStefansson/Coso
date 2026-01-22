@@ -256,26 +256,22 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         if not self.params.get("use_wells", True):
             return super().set_well_network()
         # Read well network from file.
-        wells = []
         s = self.domain_size() / 3.0
         x_prod = np.full((1, 3), -1.0)
         y_prod = np.array([[2, 2, self.params.get("production_well_z_endpoint", -1.5)]])
         z_prod = np.array([[0, -3, -3]])
         pts_prod = np.vstack([x_prod, y_prod, z_prod]) * s
         # Create a well object.
-        well_prod = pp.Well(
-            pts_prod, tags={"well_name": self.production_well_names[0]}
-        )  # 16a20
-        wells.append(well_prod)
+        well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
         x_inj = np.full((1, 3), 1)
         y_inj = np.array([[2, 2, -1.5]])
         z_inj = np.array([[0, -3, -3]])
         pts_inj = np.vstack([x_inj, y_inj, z_inj]) * s
         # Create a well object.
-        well = pp.Well(
+        well_inj = pp.Well(
             pts_inj, tags={"well_name": self.injection_well_names[0]}
         )  # 68 20rd
-        wells.append(well)
+        wells = [well_inj, well_prod]
         self.well_network = pp.WellNetwork3d(
             domain=self._domain, wells=wells, parameters={"mesh_size": 250.0}
         )
@@ -297,10 +293,24 @@ class ConceptualGeometry(TwoEllipticFractures3d):
 
     def set_fractures(self):
         s = self.domain_size() / 3.0
-        center = s * np.array([-1.0, 1.0, -3.0])
 
-        # Create a single elliptic fracture
         num_points = 15
+
+        center_injection = s * np.array([1.0, 0, -3.0])
+        # Create a single elliptic fracture
+        self._fractures.append(
+            pp.create_elliptic_fracture(
+                center=center_injection,
+                strike_angle=0,
+                dip_angle=np.pi / 2,
+                major_axis=self.fracture_major_axes[2],
+                minor_axis=self.fracture_minor_axes[2],
+                major_axis_angle=0,
+                num_points=num_points,
+            )
+        )
+
+        center = s * np.array([-1.0, 1.0, -3.0])
         self._fractures = [
             pp.create_elliptic_fracture(
                 center=center,
@@ -325,15 +335,88 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 num_points=num_points,
             )
         )
-        center_injection = s * np.array([1.0, 0, -3.0])
-        # Create a single elliptic fracture
+
+
+class LargeGeometry(TwoEllipticFractures3d):
+    def set_well_network(self) -> None:
+        """Assign well network class."""
+        if not self.params.get("use_wells", True):
+            return super().set_well_network()
+        x = self.domain_sizes()[0] / 2
+        z = -self.domain_sizes()[2] * 1 / 2
+        y_max = self.domain_sizes()[1]
+        x_prod = np.array([[x - 5e2, x - 5e2, x + 5e2]])
+        y_prod = np.full((1, 3), y_max - 3e3)
+        z_prod = np.array([[0, z, z]])
+        pts_prod = np.vstack([x_prod, y_prod, z_prod])
+        # Create a well object.
+        well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
+        x_inj = np.array([[x - 5e2, x - 5e2, x + 5e2]])
+        y_inj = np.full((1, 3), y_max - 5e3)
+        z_inj = np.array([[0, z, z]])
+        pts_inj = np.vstack([x_inj, y_inj, z_inj])
+        # Create a well object.
+        well_inj = pp.Well(
+            pts_inj, tags={"well_name": self.injection_well_names[0]}
+        )  # 68 20rd
+        wells = [well_inj, well_prod]
+        self.well_network = pp.WellNetwork3d(
+            domain=self._domain, wells=wells, parameters={"mesh_size": 250.0}
+        )
+
+    def set_fractures(self):
+        dy = 1e3
+        x = self.domain_sizes()[0] / 2
+        z = -self.domain_sizes()[2] * 1 / 2
+        y_max = self.domain_sizes()[1]
+
+        # Injection fracture
+        num_points = 15
+        major_axes = np.full((4,), 7.5e2)
+        minor_axes = np.full((4,), 7.5e2)
+        angle = self.params.get("fracture_strike_angle", np.pi / 4)
+        self._fractures = [
+            pp.create_elliptic_fracture(
+                center=np.array([x, y_max - 5 * dy, z]),
+                strike_angle=np.pi / 2,
+                dip_angle=np.pi / 2,
+                major_axis=major_axes[0],
+                minor_axis=minor_axes[0],
+                major_axis_angle=0,
+                num_points=num_points,
+            )
+        ]
+        # Production fracture
         self._fractures.append(
             pp.create_elliptic_fracture(
-                center=center_injection,
-                strike_angle=0,
+                center=np.array([x, y_max - 3 * dy, z]),
+                strike_angle=angle,
                 dip_angle=np.pi / 2,
-                major_axis=self.fracture_major_axes[2],
-                minor_axis=self.fracture_minor_axes[2],
+                major_axis=major_axes[1],
+                minor_axis=minor_axes[1],
+                major_axis_angle=0,
+                num_points=num_points,
+            )
+        )
+        # Fracture between injection and production
+        self._fractures.append(
+            pp.create_elliptic_fracture(
+                center=np.array([x, y_max - 4 * dy, z]),
+                strike_angle=angle,
+                dip_angle=np.pi / 2,
+                major_axis=major_axes[2],
+                minor_axis=minor_axes[2],
+                major_axis_angle=0,
+                num_points=num_points,
+            )
+        )
+        self._fractures.append(
+            pp.create_elliptic_fracture(
+                center=np.array([x, 3 * dy, z]),
+                strike_angle=angle,
+                dip_angle=np.pi / 2,
+                major_axis=major_axes[3],
+                minor_axis=minor_axes[3],
                 major_axis_angle=0,
                 num_points=num_points,
             )
@@ -343,7 +426,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
 if __name__ == "__main__":
 
     class MockModel(
-        ConceptualGeometry, WellDataConceptual, CosoExporter, pp.MomentumBalance
+        LargeGeometry, WellDataConceptual, CosoExporter, pp.MomentumBalance
     ): ...
 
     m = MockModel(
@@ -352,7 +435,8 @@ if __name__ == "__main__":
             "meshing_arguments": {"cell_size": 5e3, "cell_size_fracture": 5e2},
             "file_name": "elliptic_fractures",
             "folder_name": "visualization/geometry",
-            "use_wells": True,
+            "use_wells": False,
+            "domain_sizes": np.array([15e3, 15e3, 4e3]),
         }
     )
     m.prepare_simulation()
