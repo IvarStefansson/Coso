@@ -110,7 +110,7 @@ if __name__ == "__main__":
     fast = 1 == 11  # Set to 1 for fast run, 0 for full run
     # Define the time parameters
     logger.info("Starting the simulation")
-    dt = 3e1
+    dt = 1e2
     # injection_start_time = 10e3
     # Include dt to make sure itis included in the time steps which are exported.
     schedule = np.array([0, 1, 10, 20, 50, 80, 111, 112, 113, 114, 115, 116]) * pp.DAY
@@ -139,11 +139,11 @@ if __name__ == "__main__":
     time_manager = pp.TimeManager(
         schedule=schedule,
         dt_init=dt,
-        dt_min_max=(1e-2, max(dt, pp.YEAR / 4)),
+        dt_min_max=(1e-2, max(dt, pp.YEAR / 5)),
         iter_max=20,
         iter_optimal_range=(5, 12),
-        iter_relax_factors=(0.6, 1.8),
-        recomp_factor=0.2,
+        iter_relax_factors=(0.6, 2.0),
+        recomp_factor=0.3,
         recomp_max=10,
     )
     dt_init = 2e9  # * pp.YEAR
@@ -182,7 +182,7 @@ if __name__ == "__main__":
         "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
         "use_wells": False,
         "reference_variable_values": pp.ReferenceVariableValues(
-            temperature=300.0,
+            temperature=350.0,
             #     pressure=pp.BAR,
         ),
         "thermal_gradient": 5e-2,  # 73,  # K/m  tåltes ikke
@@ -206,9 +206,11 @@ if __name__ == "__main__":
     #     injection_pressures[0] = 2.0 * pp.MEGA * pp.PASCAL
     #     injection_pressures[1] = 3.0 * pp.MEGA * pp.PASCAL
     # else:
-    injection_pressures[0] = 5 * pp.MEGA * pp.PASCAL
+    # injection_pressures[0] = 5 * pp.MEGA * pp.PASCAL
 
-    production_pressures = np.full(schedule.shape, -1 * pp.MEGA * pp.PASCAL)  # Reduce
+    production_pressures = np.full(
+        schedule.shape, pp.ATMOSPHERIC_PRESSURE
+    )  # -1 * pp.MEGA * pp.PASCAL)  # Reduce
     injection_temperatures = np.full(schedule.shape, 323.15)
     production_temperatures = np.full(schedule.shape, 373.15)
     # Can be refined to have different schedules for each well.
@@ -224,7 +226,7 @@ if __name__ == "__main__":
         "nl_convergence_tol_res": 1e-1,
         "nl_convergence_tol": 1e-4,
         "nl_divergence_tol": 1e20,
-        "max_iterations": 30,
+        "max_iterations": 20,
         "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
         "local_line_search": 1,
         "global_line_search": 0,
@@ -251,7 +253,7 @@ if __name__ == "__main__":
         (3, -1), order="F"
     )
     friction_coeff = (
-        np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + 0.01
+        np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + 0.001
     )
     granodiorite_values["friction_coefficient"] = friction_coeff
     model_params.update(
