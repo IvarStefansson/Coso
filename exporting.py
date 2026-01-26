@@ -13,8 +13,9 @@ from porepy.applications.convergence_analysis import ConvergenceAnalysis
 
 
 def plot_flow_rate_and_fracture_displacement(
-    csv_dir: str = "example_4_saved_data/well_monitoring",
-    well_name: str = "16A-20",
+    csv_dir: str = "conceptual_long_well_saved_data/well_monitoring",
+    well_name: str = "2 Production well",
+    file_base: str = "example_4_long_well",
 ) -> None:
     """
     Plot fluid flux from production well and displacement jump of first two fractures.
@@ -31,8 +32,8 @@ def plot_flow_rate_and_fracture_displacement(
         Name of the production well to plot (default: "16A-20")
     """
     # Read CSV files
-    well_data = pd.read_csv(os.path.join(csv_dir, "example_4.csv"))
-    fracture_data = pd.read_csv(os.path.join(csv_dir, "example_4_fractures.csv"))
+    well_data = pd.read_csv(os.path.join(csv_dir, f"{file_base}.csv"))
+    fracture_data = pd.read_csv(os.path.join(csv_dir, f"{file_base}_fractures.csv"))
 
     # Process well data
     well_data_filtered = well_data[well_data["well_name"] == well_name].copy()
@@ -46,7 +47,7 @@ def plot_flow_rate_and_fracture_displacement(
     # diverged time steps. We sort the data by time to ensure correct plotting.
     # Identify non-monotonic times.
 
-    i0 = 2
+    i0 = 1  # Initial condition does not correspond to a converged solution.
     accepted_times = [time.iloc[i0]]
     inds = [i0]
     for i, t in enumerate(time.iloc[i0:], start=i0):
@@ -55,10 +56,12 @@ def plot_flow_rate_and_fracture_displacement(
             inds.append(i)
     time = pd.Series(accepted_times)
     well_data_filtered = well_data_filtered.iloc[inds].reset_index(drop=True)
-    # Dynamically get the first two unique fracture IDs, preserving order of first occurrence
-    fracture_ids = fracture_data["fracture_id"].unique()[:2].tolist()
+    # Dynamically get the first two unique fracture IDs, preserving order of first
+    # occurrence. We pick out all but the first occurence, which corresponds to the
+    # injection fracture.
+    fracture_names = fracture_data["fracture_id"].unique()[1:].tolist()
     fracture_data_filtered = fracture_data[
-        fracture_data["fracture_id"].isin(fracture_ids)
+        fracture_data["fracture_id"].isin(fracture_names)
     ].copy()
 
     # Create figure with two y-axes
@@ -73,7 +76,7 @@ def plot_flow_rate_and_fracture_displacement(
         well_data_filtered["fluid_flux_numeric"],
         color=color1,
         linewidth=2,
-        label=f"Fluid Flux ({well_name})",
+        label="Fluid Flux in Production Well",
     )
     ax1.tick_params(axis="y", labelcolor=color1)
 
@@ -81,12 +84,27 @@ def plot_flow_rate_and_fracture_displacement(
     ax2 = ax1.twinx()
     color2 = "tab:orange"
     color3 = "tab:green"
+    color4 = "tab:purple"
+    colors = [color2, color3]
     ax2.set_ylabel("Displacement Jump (m)", fontsize=12)
-    fracture_mapping = {fracture_ids[0]: "not connected", fracture_ids[1]: "connected"}
+    if "example_4" in file_base:
+        fracture_mapping = {
+            fracture_names[0]: "connected",
+            fracture_names[1]: "not connected",
+        }
+        if "long_well" in file_base:
+            fracture_mapping[fracture_names[0]] = "connected"
+
+    else:
+        fracture_mapping = {
+            fracture_names[0]: "conductive",
+            fracture_names[1]: "blocking",
+        }
+        colors.append(color4)
     # Plot displacement jump for each fracture
-    for fracture_id, color in zip(fracture_ids, [color2, color3]):
+    for fracture_name, color in zip(fracture_names, colors):
         fracture_subset = fracture_data_filtered[
-            fracture_data_filtered["fracture_id"] == fracture_id
+            fracture_data_filtered["fracture_id"] == fracture_name
         ].sort_values("time")
         fracture_subset = fracture_subset.iloc[inds].reset_index(drop=True)
         ax2.semilogy(
@@ -94,9 +112,8 @@ def plot_flow_rate_and_fracture_displacement(
             fracture_subset["displacement_jump"],
             color=color,
             linewidth=2,
-            marker="o",
             markersize=4,
-            label=f"Displacement Jump on fracture {fracture_id} ({fracture_mapping[fracture_id]})",
+            label=f"Displacement Jump on {fracture_name}",  # ({fracture_mapping[fracture_name]})",
         )
 
     ax2.tick_params(axis="y")
@@ -107,20 +124,20 @@ def plot_flow_rate_and_fracture_displacement(
     ax1.legend(
         lines1 + lines2,
         [l.get_label() for l in lines1 + lines2],
-        loc="best",
+        loc="lower right",
         fontsize=10,
         framealpha=0.9,
         edgecolor="black",
     )
 
     plt.title(
-        "Production Well Fluid Flux and Fracture Displacement Jump vs Time",
+        "Production Well Fluid Flux and Fracture Displacement Jump",
         fontsize=14,
         fontweight="bold",
     )
     fig.tight_layout()
     # Save the plot
-    output_path = os.path.join(csv_dir, "flow_rate_displacement_plot.png")
+    output_path = os.path.join(csv_dir, "flow_rate_and_displacement_plot.png")
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"Plot saved to: {output_path}")
 
@@ -148,13 +165,16 @@ class CosoExporter:
                     self.units.convert_units(depth, "m"),
                 )
             )
-            data.append(
-                (
-                    sd,
-                    "hydrostatic_pressure",
-                    self.units.convert_units(self.hydrostatic_pressure(depth), "Pa"),
+            if hasattr(self, "hydrostatic_pressure"):
+                data.append(
+                    (
+                        sd,
+                        "hydrostatic_pressure",
+                        self.units.convert_units(
+                            self.hydrostatic_pressure(depth), "Pa"
+                        ),
+                    )
                 )
-            )
         for sd in self.mdg.subdomains():
             if not self.is_well_grid(sd):
                 continue
@@ -274,11 +294,12 @@ class CosoExporter:
         ).reshape((self.nd, -1), order="F")
         jump_norm = np.linalg.norm(displacement_jump, axis=0)
         for id, sd in enumerate(fracs):
-            key = "fracture_" + str(id)
+            key = self.fracture_names()[sd.frac_num]
             data[key] = {
                 "displacement_jump": ConvergenceAnalysis.lp_norm(
                     jump_norm[cell_offsets[id] : cell_offsets[id + 1]],
                     fracs[id].cell_volumes,
+                    p=1,
                 )
                 / np.sum(fracs[id].cell_volumes),
             }
@@ -293,7 +314,7 @@ class CosoExporter:
         fracture_records = []
         for time, data in zip(self._data_collection_times, self.results):
             for name, variables in data.items():
-                if name.startswith("fracture_"):
+                if name.startswith("Fracture"):
                     record = {"time": time, "fracture_id": name}
                     record.update(variables)
                     fracture_records.append(record)
@@ -388,6 +409,11 @@ class CosoExporter:
                 suffix = "_fluxes" if "flux" in var_pair[1] else ""
 
                 plt.title(f"Well Data for {plt_name}")
+                # Ensure the output directory exists
+                if not os.path.exists(
+                    f"{self.params['data_folder_name']}/well_monitoring/"
+                ):
+                    os.makedirs(f"{self.params['data_folder_name']}/well_monitoring/")
                 plt.savefig(
                     f"{self.params['data_folder_name']}/well_monitoring/"
                     + f"{self.params['file_name']}_{plt_name}{suffix}.png"
@@ -395,6 +421,7 @@ class CosoExporter:
         plot_flow_rate_and_fracture_displacement(
             csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
             well_name=self.production_well_names[0],
+            file_base=self.params["file_name"],
         )
 
 
@@ -434,4 +461,16 @@ class GeometryExporting:
 
 
 if __name__ == "__main__":
-    plot_flow_rate_and_fracture_displacement()
+    suffix = "_long_well"
+    # suffix = ""
+    csv_dir = f"short_cold{suffix}_saved_data/well_monitoring"
+    well_name = "2 Production well"
+    file_base = f"example_4{suffix}"
+
+    suffix = "_with_solid_expansion"
+    csv_dir = f"thermal{suffix}_saved_data/well_monitoring"
+    well_name = "2 Production well"
+    file_base = f"example_5{suffix}"
+    plot_flow_rate_and_fracture_displacement(
+        csv_dir=csv_dir, well_name=well_name, file_base=file_base
+    )

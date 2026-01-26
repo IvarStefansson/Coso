@@ -221,7 +221,6 @@ class FractureGeometry2(EllipticFractureGeometry):
             easting, northing, offset
         )
         strike, dip = plane_equation_to_strike_dip(A, B, C, D)
-        # Create a single elliptic fracture
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center,
@@ -236,7 +235,6 @@ class FractureGeometry2(EllipticFractureGeometry):
         center_injection = self.units.convert_units(
             np.array([1.1, -3.4, -1.9]) * pp.KILO * pp.METER, "m"
         )
-        # Create a single elliptic fracture
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center_injection,
@@ -291,14 +289,22 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         }
         self._domain = pp.Domain(bounding_box=box)
 
+    def fracture_names(self) -> list[str]:
+        return ["Fracture 1", "Fracture 2", "Fracture 3"]
+
     def set_fractures(self):
+        # The order of the fractures is used elsewhere, inferred from sd.frac_num if
+        # we operate on grids. Make sure the order is
+        #  0 injection,
+        #  1 production,
+        #  2 production or passive, depending on length of well.
         s = self.domain_size() / 3.0
 
         num_points = 15
 
         center_injection = s * np.array([1.0, 0, -3.0])
         # Create a single elliptic fracture
-        self._fractures.append(
+        self._fractures = [  # First the injection fracture
             pp.create_elliptic_fracture(
                 center=center_injection,
                 strike_angle=0,
@@ -308,10 +314,11 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 major_axis_angle=0,
                 num_points=num_points,
             )
-        )
+        ]
 
         center = s * np.array([-1.0, 1.0, -3.0])
-        self._fractures = [
+        # Production fracture, always connected.
+        self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center,
                 strike_angle=-np.pi / 4,
@@ -321,9 +328,9 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 major_axis_angle=0,
                 num_points=num_points,
             )
-        ]
+        )
         center = s * np.array([-1.0, -1.0, -3.0])
-
+        # Production or passive fracture, connected for long well.
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center,
@@ -364,7 +371,17 @@ class LargeGeometry(TwoEllipticFractures3d):
             domain=self._domain, wells=wells, parameters={"mesh_size": 250.0}
         )
 
+    def fracture_names(self) -> list[str]:
+        return ["Fracture 1", "Fracture 2", "Fracture 3", "Fracture 4"]
+
     def set_fractures(self):
+        # The order of the fractures is used elsewhere, inferred from sd.frac_num if
+        # we operate on grids. Make sure the order is
+        #  0 injection,
+        #  1 production,
+        #  2 in reservoir between injection and production,
+        #  3 outside reservoir.
+
         dy = 1e3
         x = self.domain_sizes()[0] / 2
         z = -self.domain_sizes()[2] * 1 / 2
@@ -372,9 +389,10 @@ class LargeGeometry(TwoEllipticFractures3d):
 
         # Injection fracture
         num_points = 15
-        major_axes = np.full((4,), 7.5e2)
+        params = self.params.get("fracture_parameters", {})
+        major_axes = params.get("fracture_major_axes", np.full((4,), 7.5e2))
         minor_axes = np.full((4,), 7.5e2)
-        angle = self.params.get("fracture_strike_angle", np.pi / 4)
+        angle = params["strike_angle"]
         self._fractures = [
             pp.create_elliptic_fracture(
                 center=np.array([x, y_max - 5 * dy, z]),
@@ -410,6 +428,7 @@ class LargeGeometry(TwoEllipticFractures3d):
                 num_points=num_points,
             )
         )
+        # Passive fracture outside reservoir.
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=np.array([x, 3 * dy, z]),
@@ -432,7 +451,12 @@ if __name__ == "__main__":
     m = MockModel(
         {
             "grid_type": "simplex",
-            "meshing_arguments": {"cell_size": 5e3, "cell_size_fracture": 5e2},
+            "meshing_arguments": {"cell_size": 2e3, "cell_size_fracture": 5e2},
+            "meshing_kwargs": {
+                "refinement_buffer": 0.25,
+                "farfield_transition": 0.10,
+                "refinement_threshold": 0.15,
+            },
             "file_name": "elliptic_fractures",
             "folder_name": "visualization/geometry",
             "use_wells": False,
