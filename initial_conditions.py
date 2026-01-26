@@ -1,6 +1,7 @@
 import numpy as np
 import porepy as pp
 from functools import partial
+from scipy.interpolate import interp1d
 
 
 class InitialConditionFromDepth:
@@ -128,9 +129,35 @@ class CopyInitialCondition:
             variables, time_step_index=0
         )
 
+    def interpolate_initial_condition(self, sd: pp.Grid, variable: str) -> np.ndarray:
+        """Interpolate initial conditions as a function of depth from all grids of the
+        initialization model.
+
+        Parameters:
+            sd: Subdomain to copy from.
+            variable: Variable to copy.
+        Returns:
+            Array with initial condition values.
+
+        """
+        im = self.initialization_model
+        var = im.equation_system.get_variables([variable])
+        vals = np.hstack([v.value(im.equation_system) for v in var])
+        depths = np.hstack([im.depth(v.domain.cell_centers) for v in var])
+        depths_sorted_indices = np.argsort(depths)
+        depths_sorted = depths[depths_sorted_indices]
+        vals_sorted = vals[depths_sorted_indices]
+        f = interp1d(
+            depths_sorted,
+            vals_sorted,
+            kind="linear",
+            fill_value="extrapolate",
+        )
+        return f(self.depth(sd.cell_centers))
+
     def ic_values_pressure(self, sd: pp.Grid) -> np.ndarray:
         if self.well_related_domain(sd):
-            return self.hydrostatic_pressure(self.depth(sd.cell_centers))
+            return self.interpolate_initial_condition(sd, "pressure")
         else:
             return self.copy_initial_conditions(sd, "pressure")
 
@@ -142,7 +169,7 @@ class CopyInitialCondition:
 
     def ic_values_temperature(self, sd: pp.Grid) -> np.ndarray:
         if self.well_related_domain(sd):
-            return self.temperature_at_depth(self.depth(sd.cell_centers))
+            return self.interpolate_initial_condition(sd, "temperature")
         else:
             return self.copy_initial_conditions(sd, "temperature")
 
