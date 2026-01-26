@@ -225,24 +225,15 @@ class WellDataConceptual(_WellDataBase):
                     raise ValueError(f"Well {well_name} not found in well network.")
                 well.data = well_data
 
-    # @property
-    # def injection_well_names(self) -> list:
-    #     """List of injection well names."""
-    #     return ["injection"]
-
-    # @property
-    # def production_well_names(self) -> list:
-    #     """List of production well names."""
-    #     return ["production"]
     @property
     def injection_well_names(self) -> list:
         """List of injection well names."""
-        return ["68-20RD"]
+        return ["1 Injection well"]  # 68-20RD
 
     @property
     def production_well_names(self) -> list:
         """List of production well names."""
-        return ["16A-20"]
+        return ["2 Production well"]  # "16A-20"
 
     def open_well_cells(self, subdomains) -> pp.ad.Operator:
         """Open well cells in the given subdomains.
@@ -278,15 +269,13 @@ class WellDataConceptual(_WellDataBase):
             subdomains: Subdomains where to open well cells.
         """
         z = {
-            "68-20RD": np.array([1.1, 0]),
-            "16A-20": np.array([-5.0, -2.1]),
-            "16B-20": np.array([2.484, 3.196]),
+            "1 Injection well": np.array([-5.0, 0.0]),
         }
         z = {name: self.units.convert_units(z * pp.KILO, "m") for name, z in z.items()}
         well = self.parent_well(sd)
         assert well is not None, f"No well found for subdomain {sd}"
         ind = np.ones(sd.num_cells, dtype=int)
-        if well.tags["well_name"] == "16A-20":
+        if "Injection" in well.tags["well_name"]:  # == "16A-20":
             coord_vals = z[well.tags["well_name"]]
             axis = 1
             where = np.logical_and(
