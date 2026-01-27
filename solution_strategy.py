@@ -1,8 +1,15 @@
+import logging
+import time
 import numpy as np
+import scipy.sparse as sps
+import warnings
 from typing import Union
 import porepy as pp
 from functools import partial
 from functools import wraps
+
+
+logger = logging.getLogger(__name__)
 
 
 def clip_decorator(a: float, b: float):
@@ -40,6 +47,64 @@ class SolutionStrategy:
         self.read_well_data()
         # self.fracture_locking_variable = pp.ad.Scalar(0)
         super().initial_condition()
+
+    def solve_linear_system(self) -> np.ndarray:
+        """Solve linear system.
+
+        Default method is a direct solver. The linear solver is chosen in the
+        initialize_linear_solver of this model. Implemented options are
+            - scipy.sparse.spsolve with and without call to umfpack
+            - pypardiso.spsolve
+
+        See also:
+            :meth:`initialize_linear_solver`
+
+        Returns:
+            np.ndarray: Solution vector.
+
+        """
+        A, b = self.linear_system
+        t_0 = time.time()
+        logger.debug(f"Max element in A {np.max(np.abs(A)):.2e}")
+        logger.debug(
+            f"""Max {np.max(np.sum(np.abs(A), axis=1)):.2e} and min
+            {np.min(np.sum(np.abs(A), axis=1)):.2e} A sum."""
+        )
+
+        solver = self.linear_solver
+        if solver == "pypardiso":
+            # This is the default option which is invoked unless explicitly overridden
+            # by the user. We need to check if the pypardiso package is available.
+            try:
+                from pypardiso import spsolve as sparse_solver  # type: ignore
+            except ImportError:
+                # Fall back on the standard scipy sparse solver.
+                sparse_solver = sps.linalg.spsolve
+                warnings.warn(
+                    """PyPardiso could not be imported,
+                    falling back on scipy.sparse.linalg.spsolve"""
+                )
+            try:
+                x = sparse_solver(A, b)
+            except Exception as e:
+                warnings.warn(
+                    f"Pypardiso solver failed with error {e}, returning NaN solution."
+                )
+                x = np.full(b.shape, np.nan)
+        elif solver == "umfpack":
+            # Following may be needed:
+            # A.indices = A.indices.astype(np.int64)
+            # A.indptr = A.indptr.astype(np.int64)
+            x = sps.linalg.spsolve(A, b, use_umfpack=True)
+        elif solver == "scipy_sparse":
+            x = sps.linalg.spsolve(A, b)
+        else:
+            raise ValueError(
+                f"AbstractModel does not know how to apply the linear solver {solver}"
+            )
+        x = np.atleast_1d(x)
+        logger.info(f"Solved linear system in {time.time() - t_0:.2e} seconds.")
+        return x
 
 
 class Foo:
