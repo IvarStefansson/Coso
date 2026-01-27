@@ -5,3 +5,8 @@
 *.geo_unrolled
 saved_data*
 visualization
+*.png
+*.csv
+*.json
+*.txt
+*.pdf
