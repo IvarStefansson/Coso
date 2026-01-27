@@ -168,7 +168,6 @@ if __name__ == "__main__":
         "material_constants": {
             "solid": pp.SolidConstants(**init_granodiorite_values),
             "fluid": pp.FluidComponent(**pp.fluid_values.water),
-            # "numerical": pp.NumericalConstants(characteristic_displacement=1e-2),  # type: ignore[arg-type]
         },
         "units": pp.Units(m=1.0, kg=1.0e0, K=1.0),
         "time_manager": time_manager_init,
@@ -190,27 +189,17 @@ if __name__ == "__main__":
         "folder_name": folder_name_init,
         "initialization": True,
         "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
-        # "lithostatic_stress_multipliers": np.array([1.0, 1.0, 1.0]),
         "fracture_params": {  # Other options are available in the geometry mixin.
             "fracture_major_axes": np.array(
                 (fracture_size, fracture_size, 1.0 * fracture_size)
             ),
-            # "num_points": np.array((9, 8)),  # Number of points to define each fracture
-            # "dip_angles": np.array((np.pi / 4, np.pi / 2)),  # Slanted and vertical
         },
     }
     model_params = copy.deepcopy(model_params_init)
     # Reduce target pressure in favour of displacement BC as driving force?
     injection_pressures = np.full(schedule.shape, 10 * pp.MEGA * pp.PASCAL)
-    # if issubclass(MainModel, NeumannWellBCsFirstTimeInterval):
-    #     injection_pressures[0] = 2.0 * pp.MEGA * pp.PASCAL
-    #     injection_pressures[1] = 3.0 * pp.MEGA * pp.PASCAL
-    # else:
-    # injection_pressures[0] = 5 * pp.MEGA * pp.PASCAL
 
-    production_pressures = np.full(
-        schedule.shape, pp.ATMOSPHERIC_PRESSURE
-    )  # -1 * pp.MEGA * pp.PASCAL)  # Reduce
+    production_pressures = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
     injection_temperatures = np.full(schedule.shape, 323.15)
     production_temperatures = np.full(schedule.shape, 373.15)
     # Can be refined to have different schedules for each well.
