@@ -271,7 +271,9 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         )  # 68 20rd
         wells = [well_inj, well_prod]
         self.well_network = pp.WellNetwork3d(
-            domain=self._domain, wells=wells, parameters={"mesh_size": 250.0}
+            domain=self._domain,
+            wells=wells,
+            parameters={"mesh_size": self.params["meshing_arguments"]["cell_size"] / 2},
         )
 
     def domain_size(self) -> float:
@@ -389,7 +391,7 @@ class LargeGeometry(TwoEllipticFractures3d):
 
         # Injection fracture
         num_points = 15
-        params = self.params.get("fracture_parameters", {})
+        params = self.params["fracture_params"]
         major_axes = params.get("fracture_major_axes", np.full((4,), 7.5e2))
         minor_axes = np.full((4,), 7.5e2)
         angle = params["strike_angle"]
@@ -436,6 +438,60 @@ class LargeGeometry(TwoEllipticFractures3d):
                 dip_angle=np.pi / 2,
                 major_axis=major_axes[3],
                 minor_axis=minor_axes[3],
+                major_axis_angle=0,
+                num_points=num_points,
+            )
+        )
+
+
+class CoolingGeometry(ConceptualGeometry):
+    def fracture_names(self) -> list[str]:
+        return ["Fracture 1", "Fracture 2", "Fracture 3"]
+
+    def set_fractures(self):
+        # The order of the fractures is used elsewhere, inferred from sd.frac_num if
+        # we operate on grids. Make sure the order is
+        #  0 injection,
+        #  1 production,
+        #  2 production or passive, depending on length of well.
+        s = self.domain_size() / 3.0
+
+        num_points = 15
+
+        center_injection = s * np.array([1.0, 0, -3.0])
+        self._fractures = [  # First the injection fracture
+            pp.create_elliptic_fracture(
+                center=center_injection,
+                strike_angle=self.params["fracture_params"]["strike_angles"][0],
+                dip_angle=np.pi / 2,
+                major_axis=self.fracture_major_axes[2],
+                minor_axis=self.fracture_minor_axes[2],
+                major_axis_angle=0,
+                num_points=num_points,
+            )
+        ]
+        center = s * np.array([0.0, 0.0, -3.0])
+        # Center fracture
+        self._fractures.append(
+            pp.create_elliptic_fracture(
+                center=center,
+                strike_angle=self.params["fracture_params"]["strike_angles"][1],
+                dip_angle=np.pi / 2,
+                major_axis=self.fracture_major_axes[0],
+                minor_axis=self.fracture_minor_axes[0],
+                major_axis_angle=0,
+                num_points=num_points,
+            )
+        )
+        center = s * np.array([-1.0, 0.0, -3.0])
+        # Production fracture, always connected.
+        self._fractures.append(
+            pp.create_elliptic_fracture(
+                center=center,
+                strike_angle=self.params["fracture_params"]["strike_angles"][2],
+                dip_angle=np.pi / 2,
+                major_axis=self.fracture_major_axes[0],
+                minor_axis=self.fracture_minor_axes[0],
                 major_axis_angle=0,
                 num_points=num_points,
             )
