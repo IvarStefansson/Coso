@@ -91,7 +91,7 @@ class CosoBoundaryConditionsDisplacement:
         values = self.boundary_displacement_from_initialization(boundary_grid)
         # Set velocity for all cells. The displacement is scaled with the x-coordinate
         # and time.
-        if self.params["use_wells"]:
+        if not self.params["initialization"]:
             coords = boundary_grid.cell_centers
             x_scaling = coords[0] - self.domain.bounding_box["xmin"]
             y_scaling = coords[1] - self.domain.bounding_box["ymin"]

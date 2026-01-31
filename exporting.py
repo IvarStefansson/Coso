@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
 
+DISPLACEMENT_JUMP_Y_MIN = 1e-10
+
 
 def plot_flow_rate_and_fracture_displacement(
     csv_dir: str = "conceptual_long_well_saved_data/well_monitoring",
@@ -25,11 +27,8 @@ def plot_flow_rate_and_fracture_displacement(
     - Right axis: displacement_jump (m) for the first two fractures vs time
 
     Parameters:
-    -----------
-    csv_dir : str
-        Path to directory containing the CSV files
-    well_name : str
-        Name of the production well to plot (default: "16A-20")
+        csv_dir: Path to directory containing the CSV files.
+        well_name: Name of the production well to plot (default: "16A-20").
     """
     # Read CSV files
     well_data = pd.read_csv(os.path.join(csv_dir, f"{file_base}.csv"))
@@ -117,6 +116,7 @@ def plot_flow_rate_and_fracture_displacement(
         )
 
     ax2.tick_params(axis="y")
+    ax2.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
 
     # Create combined legend
     lines1 = line1
@@ -144,10 +144,142 @@ def plot_flow_rate_and_fracture_displacement(
     return fig
 
 
+def plot_fracture_displacement(
+    csv_dir: str = "conceptual_saved_data/well_monitoring",
+    file_base: str = "example_3",
+) -> None:
+    """
+    Plot displacement jump of fractures over time (for simulations without wells).
+
+    This function creates a plot showing the displacement_jump (m) for fractures vs time.
+
+    Parameters:
+        csv_dir: Path to directory containing the CSV files.
+        file_base: Base name for the CSV file (default: "example_3").
+    """
+    # Read CSV file for fractures
+    fracture_data = pd.read_csv(os.path.join(csv_dir, f"{file_base}_fractures.csv"))
+
+    # Get time data from fracture data
+    time = fracture_data["time"].unique()
+    time = pd.Series(np.sort(time))
+
+    # Process time data to handle non-monotonic times (due to diverged time steps)
+    # Initial condition does not correspond to a converged solution.
+    i0 = 1
+    accepted_times = [time.iloc[i0]]
+
+    for i, t in enumerate(time.iloc[i0:], start=i0):
+        if t > accepted_times[-1]:
+            accepted_times.append(t)
+
+    time = pd.Series(accepted_times)
+
+    # Get unique fracture IDs, preserving order of first occurrence
+    fracture_names = fracture_data["fracture_id"].unique().tolist()
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Set up colors for different fractures
+    color_map = {
+        0: "tab:orange",
+        1: "tab:green",
+        2: "tab:purple",
+        3: "tab:red",
+    }
+
+    # Determine fracture mapping based on file_base
+    if "example_4" in file_base:
+        fracture_mapping = {}
+        for idx, fname in enumerate(fracture_names):
+            if idx == 0:
+                fracture_mapping[fname] = "connected"
+            else:
+                fracture_mapping[fname] = "not connected"
+        if "long_well" in file_base and len(fracture_names) > 0:
+            fracture_mapping[fracture_names[0]] = "connected"
+    else:
+        fracture_mapping = {}
+        labels = ["conductive", "blocking"]
+        for idx, fname in enumerate(fracture_names):
+            if idx < len(labels):
+                fracture_mapping[fname] = labels[idx]
+            else:
+                fracture_mapping[fname] = f"fracture_{idx}"
+
+    # Plot displacement jump for each fracture
+    for idx, fracture_name in enumerate(fracture_names):
+        fracture_subset = fracture_data[
+            fracture_data["fracture_id"] == fracture_name
+        ].sort_values("time")
+
+        # Filter to accepted times
+        fracture_subset = fracture_subset[fracture_subset["time"].isin(accepted_times)]
+
+        color = color_map.get(idx, f"C{idx}")
+        ax.semilogy(
+            fracture_subset["time"],
+            fracture_subset["displacement_jump"],
+            color=color,
+            linewidth=2,
+            marker="o",
+            markersize=4,
+            label=f"{fracture_name}",  # ({fracture_mapping.get(fracture_name, '')})",
+        )
+
+    ax.set_xlabel("Time (s)", fontsize=12)
+    ax.set_ylabel("Displacement Jump (m)", fontsize=12)
+    ax.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
+    ax.legend(loc="best", fontsize=10, framealpha=0.9, edgecolor="black")
+    ax.grid(True, alpha=0.3)
+
+    plt.title(
+        "Fracture Displacement Jump Over Time",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.tight_layout()
+
+    # Save the plot
+    output_path = os.path.join(csv_dir, "fracture_displacement_plot.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Plot saved to: {output_path}")
+
+    return fig
+
+
 class CosoExporter:
     evaluate_and_scale: Callable[
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
+
+    def _face_scalar_to_cell_vector(
+        self, sd: pp.Grid, face_scalar: np.ndarray
+    ) -> np.ndarray:
+        """Convert face-wise scalar to cell-wise averaged vector.
+
+        Given a scalar value at each face and the face normals, compute a vector
+        for each cell by averaging the normal-weighted scalars over the cell's faces.
+        Area weighting is removed by dividing by face areas.
+
+        Parameters:
+            sd: Grid
+            face_scalar: Scalar values at each face, shape (num_faces,)
+
+        Returns:
+            Cell-wise vector data, shape (sd.dim, sd.num_cells)
+        """
+        # Remove area weighting: scalar_vector = (scalar / face_areas) * face_normals
+        scalar_unweighted = face_scalar / sd.face_areas
+        face_vectors = sd.face_normals * scalar_unweighted  # Shape: (sd.dim, num_faces)
+        f2c = sd.divergence(self.nd)
+        f2c.data = np.abs(f2c.data)  # Face-to-cell connectivity matrix
+        cell_vector = f2c @ face_vectors.ravel("F")
+        # Infer number of faces from the csr matrix f2c
+        faces_per_cell = np.diff(f2c.indptr)
+        result = cell_vector / faces_per_cell
+        return result
 
     def data_to_export(self) -> list:
         """Returns data for exporting.
@@ -165,6 +297,14 @@ class CosoExporter:
                     self.units.convert_units(depth, "m"),
                 )
             )
+            if sd.dim == self.nd - 1:
+                data.append(
+                    (
+                        sd,
+                        "fracture_name",
+                        np.full(sd.num_cells, sd.frac_num),
+                    )
+                )
             if hasattr(self, "hydrostatic_pressure"):
                 data.append(
                     (
@@ -175,6 +315,16 @@ class CosoExporter:
                         ),
                     )
                 )
+            # Export face-wise fluxes as cell-averaged vectors
+            if hasattr(self, "fluid_flux"):
+                if sd.dim > 0:
+                    flux = self.evaluate_and_scale(
+                        [sd], "fluid_flux", "kg * s^-1 * m^-2"
+                    )
+                    cell_flux = self._face_scalar_to_cell_vector(sd, flux)
+                else:
+                    cell_flux = np.zeros((self.nd, sd.num_cells))
+                data.append((sd, "fluid_flux_vector", cell_flux.ravel("F")))
         for sd in self.mdg.subdomains():
             if not self.is_well_grid(sd):
                 continue
@@ -186,45 +336,6 @@ class CosoExporter:
             well_tag = int(well.tags["well_name"][:2])
             data.append((sd, "well_name", np.full(sd.num_cells, well_tag)))
         return data
-
-    #     sds = self.mdg.subdomains(dim=self.nd - 1)
-    #     cell_offsets = np.cumsum([0] + [sd.num_cells * self.nd for sd in sds])
-    #     displacement_jump = self.evaluate_and_scale(sds, "displacement_jump", "m")
-    #     char = self.evaluate_and_scale(sds, "characteristic_contact_traction", "Pa")
-    #     traction = self.evaluate_and_scale(sds, "contact_traction", "-")
-    #     # Loop over the fracture subdomains
-    #     for id, sd in enumerate(sds):
-    #         # Export the displacement jump.
-    #         data.append(
-    #             (
-    #                 sd,
-    #                 "displacement_jump",
-    #                 displacement_jump[cell_offsets[id] : cell_offsets[id + 1]],
-    #             )
-    #         )
-    #         # Export the slip tendency, defined as the ratio of the shear traction to
-    #         # the normal traction.
-    #         traction_loc = traction[cell_offsets[id] : cell_offsets[id + 1]].reshape(
-    #             (3, -1), order="F"
-    #         )
-    #         zero_inds = np.isclose(traction_loc[-1], 0)
-    #         traction_loc[-1, zero_inds] = -1
-    #         traction_loc[0, zero_inds] = 1
-    #         slip_tendency = np.linalg.norm(traction_loc[:-1], axis=0) / np.abs(
-    #             traction_loc[-1]
-    #         )
-    #         data.append((sd, "slip_tendency", slip_tendency))
-
-    #         data.append((sd, "traction", traction_loc.ravel("F") * char))
-    #         # residual = self.equation_system.assemble(evaluate_jacobian=False)
-    #         # data.append((sd, "residual", residual))
-
-    #     for sd in self.mdg.subdomains(dim=1):
-    #         if self.parent_well(sd) is not None:
-    #             if sd.tags.get("open_well_cells", False) is False:
-    #                 self.open_well_cells([sd])
-    #             data.append((sd, "open_well_cells", sd.tags["open_well_cells"]))
-    #     return data
 
     def collect_data(self) -> dict:
         """Collect data for well monitoring.
@@ -342,6 +453,12 @@ class CosoExporter:
         """Plot well monitoring data for a given well."""
         if not hasattr(self, "well_monitoring_data"):
             self.save_results()
+        if not self.params["use_wells"]:
+            plot_fracture_displacement(
+                csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
+                file_base=self.params["file_name"],
+            )
+            return
         well_names = self.injection_well_names + self.production_well_names
         df = self.well_monitoring_data
         if hasattr(self, "temperature_trace"):
