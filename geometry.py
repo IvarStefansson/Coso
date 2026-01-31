@@ -444,7 +444,7 @@ class LargeGeometry(TwoEllipticFractures3d):
         )
 
 
-class CoolingGeometry(ConceptualGeometry):
+class CoolingGeometry(TwoEllipticFractures3d):
     def fracture_names(self) -> list[str]:
         return ["Fracture 1", "Fracture 2", "Fracture 3"]
 
@@ -454,56 +454,91 @@ class CoolingGeometry(ConceptualGeometry):
         #  0 injection,
         #  1 production,
         #  2 production or passive, depending on length of well.
-        s = self.domain_size() / 3.0
+        dx = self.domain_sizes()[0] / 12
+        y = self.domain_sizes()[1] / 2
+        z = -self.domain_sizes()[2] / 2
+        x = self.domain_sizes()[0] * 5 / 12
 
         num_points = 15
 
-        center_injection = s * np.array([1.0, 0, -3.0])
+        center_injection = np.array([x, y, z])
+        params = self.params["fracture_params"]
+        r = params.get("fracture_major_axes")
         self._fractures = [  # First the injection fracture
             pp.create_elliptic_fracture(
                 center=center_injection,
-                strike_angle=self.params["fracture_params"]["strike_angles"][0],
+                strike_angle=params["strike_angles"][0],
                 dip_angle=np.pi / 2,
-                major_axis=self.fracture_major_axes[2],
-                minor_axis=self.fracture_minor_axes[2],
+                major_axis=r[0],
+                minor_axis=r[0],
                 major_axis_angle=0,
                 num_points=num_points,
             )
         ]
-        center = s * np.array([0.0, 0.0, -3.0])
+        center = np.array([x + dx + params.get("center_fracture_x_offset", 0), y, z])
         # Center fracture
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center,
-                strike_angle=self.params["fracture_params"]["strike_angles"][1],
+                strike_angle=params["strike_angles"][1],
                 dip_angle=np.pi / 2,
-                major_axis=self.fracture_major_axes[0],
-                minor_axis=self.fracture_minor_axes[0],
+                major_axis=r[1],
+                minor_axis=r[1],
                 major_axis_angle=0,
                 num_points=num_points,
             )
         )
-        center = s * np.array([-1.0, 0.0, -3.0])
+        center = np.array([x + 2 * dx, y, z])
         # Production fracture, always connected.
         self._fractures.append(
             pp.create_elliptic_fracture(
                 center=center,
-                strike_angle=self.params["fracture_params"]["strike_angles"][2],
+                strike_angle=params["strike_angles"][2],
                 dip_angle=np.pi / 2,
-                major_axis=self.fracture_major_axes[0],
-                minor_axis=self.fracture_minor_axes[0],
+                major_axis=r[2],
+                minor_axis=r[2],
                 major_axis_angle=0,
                 num_points=num_points,
             )
+        )
+
+    def set_well_network(self) -> None:
+        """Assign well network class."""
+        if not self.params.get("use_wells", True):
+            return super().set_well_network()
+        dx = self.domain_sizes()[0] / 12
+        y = self.domain_sizes()[1] / 2
+        dy = self.domain_sizes()[1] / 5
+        z = -self.domain_sizes()[2] / 2
+        x = self.domain_sizes()[0] * 5 / 12
+        x_inj = np.array([[x, x, x]])
+        x_prod = x_inj + 2 * dx
+        y_both = np.array([[y + dy, y + dy, y - dy]])
+        z_both = np.array([[0, z, z]])
+        pts_prod = np.vstack([x_prod, y_both, z_both])
+        # Create a well object.
+        well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
+        # y_inj = np.full((1, 3), y_max - 5e3)
+        # z_inj = np.array([[0, z, z]])
+        pts_inj = np.vstack([x_inj, y_both, z_both])
+        # Create a well object.
+        well_inj = pp.Well(
+            pts_inj, tags={"well_name": self.injection_well_names[0]}
+        )  # 68 20rd
+        wells = [well_inj, well_prod]
+        self.well_network = pp.WellNetwork3d(
+            domain=self._domain, wells=wells, parameters={"mesh_size": 250.0}
         )
 
 
 if __name__ == "__main__":
 
     class MockModel(
-        LargeGeometry, WellDataConceptual, CosoExporter, pp.MomentumBalance
+        CoolingGeometry, WellDataConceptual, CosoExporter, pp.MomentumBalance
     ): ...
 
+    fracture_size = 1e3
+    strike = 40  # degrees
     m = MockModel(
         {
             "grid_type": "simplex",
@@ -516,7 +551,13 @@ if __name__ == "__main__":
             "file_name": "elliptic_fractures",
             "folder_name": "visualization/geometry",
             "use_wells": False,
-            "domain_sizes": np.array([15e3, 15e3, 4e3]),
+            "domain_sizes": np.array([5e3, 5e3, 4e3]),
+            "fracture_params": {
+                "fracture_major_axes": np.array(
+                    (fracture_size, fracture_size, fracture_size, fracture_size)
+                ),
+                "strike_angles": np.deg2rad([0, strike, 45]),
+            },
         }
     )
     m.prepare_simulation()
