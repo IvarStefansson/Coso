@@ -101,11 +101,24 @@ class ConstraintLineSearchNonlinearSolver(
 
 
 if __name__ == "__main__":
-    fracture_strike_angles = np.array([45, 40, 35])
+    fracture_strike_angles = np.array(
+        [
+            45,
+            40,
+            35,
+        ]
+    )
+    granodiorite_values["permeability"] = 2e-15
+    granodiorite_values["residual_aperture"] = 1.0e-3
+
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
 
+    well_options = [
+        False,
+        True,
+    ]
     for strike in fracture_strike_angles:
-        for has_wells in [True, False]:
+        for has_wells in well_options:
             tic = time.time()
             if has_wells:
                 suffix = "_with_wells"
@@ -114,8 +127,8 @@ if __name__ == "__main__":
             suffix += f"_strike_{int(strike)}"
 
             logger.info(f"Starting the simulation with suffix {suffix}")
-            dt = 1e1
-            production_period = 4 * pp.YEAR
+            dt = 1e2
+            production_period = 1 * pp.YEAR
             shut_in_duration = 2 * pp.DAY
             schedule = np.array(
                 [
@@ -149,29 +162,29 @@ if __name__ == "__main__":
             time_manager = pp.TimeManager(
                 schedule=schedule,
                 dt_init=dt,
-                dt_min_max=(1e-2, max(dt, pp.YEAR / 2)),
+                dt_min_max=(1e-2, max(dt, production_period / 4)),
                 iter_max=20,
                 iter_optimal_range=(5, 12),
                 iter_relax_factors=(0.5, 2.0),
                 recomp_factor=0.3,
                 recomp_max=10,
             )
-            dt_init = 5e9  # * pp.YEAR
+            dt_init = 10e9  # * pp.YEAR
             time_manager_init = pp.TimeManager(
-                [0, 1 * dt_init],
+                [0, 2 * dt_init],
                 dt_init=dt_init,
                 dt_min_max=(1, 2 * dt_init),
                 constant_dt=True,
             )
-            fracture_size = 6e2
-            cell_size = 20e2
+            fracture_size = 4e2
+            cell_size = 18e2
 
             folder_name = "thermal" + suffix
             folder_name_init = folder_name + "_initialization"
             file_name = "example_6"
             data_folder_name = f"{folder_name}_saved_data"
             model_params_init = {
-                "domain_size": 4e3,
+                "domain_sizes": np.array([6, 6, 4]) * 1e3,
                 "material_constants": {
                     "solid": pp.SolidConstants(**init_granodiorite_values),
                     "fluid": pp.FluidComponent(**pp.fluid_values.water),
@@ -186,30 +199,35 @@ if __name__ == "__main__":
                 "file_name": file_name,
                 "data_folder_name": data_folder_name,
                 "adaptive_indicator_scaling": True,
+                "initialization": True,
                 "use_wells": False,
                 "reference_variable_values": pp.ReferenceVariableValues(
                     temperature=350.0,
                     #     pressure=pp.BAR,
                 ),
-                "thermal_gradient": 5e-2,
+                "thermal_gradient": 6e-2,
                 "fracture_file": "coords.txt",
                 "folder_name": folder_name_init,
-                "initialization": True,
                 "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
                 "fracture_params": {
                     "fracture_major_axes": np.array(
-                        (fracture_size, fracture_size, fracture_size, fracture_size)
+                        (0.75 * fracture_size, fracture_size, fracture_size)
                     ),
                     "strike_angles": np.deg2rad([0, strike, 45]),
                 },
             }
             model_params = copy.deepcopy(model_params_init)
             # Reduce target pressure in favour of displacement BC as driving force?
-            injection_pressures = np.full(schedule.shape, 10 * pp.MEGA * pp.PASCAL)
+            injection_pressures = np.full(schedule.shape, 5 * pp.MEGA * pp.PASCAL)
 
             production_pressures = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
             injection_temperatures = np.full(schedule.shape, 323.15)
             production_temperatures = np.full(schedule.shape, 373.15)
+            # NOTE: The current protocols seem to give significantly more injection than
+            # production by mass. This is consistent with the data in production.csv
+            # and injection.csv, where the ratio is about 2.5:7, albeit with two
+            # production wells.
+
             # Can be refined to have different schedules for each well.
             for name in MainModel.injection_well_names.fget(None):
                 model_params[f"{name}_pressures"] = injection_pressures
@@ -256,6 +274,7 @@ if __name__ == "__main__":
                     "file_name": file_name,
                     "folder_name": folder_name,
                     "use_wells": has_wells,
+                    "initialization": False,
                     "reference_from_initial": True,
                     "material_constants": {
                         "solid": pp.SolidConstants(**granodiorite_values),
