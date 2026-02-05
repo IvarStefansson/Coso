@@ -94,10 +94,10 @@ class CosoBoundaryConditionsDisplacement:
         if not self.params["initialization"]:
             coords = boundary_grid.cell_centers
             x_scaling = coords[0] - self.domain.bounding_box["xmin"]
-            y_scaling = coords[1] - self.domain.bounding_box["ymin"]
+            # y_scaling = coords[1] - self.domain.bounding_box["ymin"]
 
             offset_time = 0 * pp.YEAR if self.time_manager.time > 0 else 0
-            vals_time = np.outer(self.boundary_displacement_velocity, y_scaling) * (
+            vals_time = np.outer(self.boundary_displacement_velocity, x_scaling) * (
                 self.time_manager.time + offset_time
             )
             values += vals_time.ravel("F")
@@ -155,9 +155,10 @@ class CosoBoundaryConditionsDisplacement:
         management."""
         # The relative displacement rate is approx. 24 + 14 mm/year.
         # The side length of the Coso Geothermal Field is roughly 10 km.
-        # rate = (38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR) * 1000
-        rate = 500 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR
-        return np.array([0.0, -1.0, 0.0]) * self.units.convert_units(rate, "s^-1")
+        # rate = (38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR)
+        rate = 38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR
+        return self.units.convert_units(rate, "s^-1") * np.array([1.0, 0.0, 0.0])
+        return self.units.convert_units(rate, "s^-1") * np.array([0.0, 1.0, 0.0])
 
 
 class CosoBoundaryConditions:
