@@ -47,11 +47,11 @@ class CopyInitialCondition:
         u_faces_ad = (
             discr.bound_displacement_cell() @ u + discr.bound_displacement_face() @ bc
         )
-        if isinstance(self, pp.Poromechanics):
+        if hasattr(self, "pressure"):
             # Add contribution from pressure
             p = mod.perturbation_from_reference("pressure", sds)
             u_faces_ad += discr.bound_pressure(mod.darcy_keyword) @ p
-        if isinstance(self, pp.Thermoporomechanics):
+        if hasattr(self, "temperature"):
             # Add contribution from temperature
             T = mod.perturbation_from_reference("temperature", sds)
             u_faces_ad += discr.bound_pressure(mod.enthalpy_keyword) @ T
@@ -129,7 +129,9 @@ class CopyInitialCondition:
             variables, time_step_index=0
         )
 
-    def interpolate_initial_condition(self, sd: pp.Grid, variable: str) -> np.ndarray:
+    def interpolate_initial_condition(
+        self, sd: pp.Grid, variable: str, fallback_vals: np.ndarray
+    ) -> np.ndarray:
         """Interpolate initial conditions as a function of depth from all grids of the
         initialization model.
 
@@ -147,17 +149,36 @@ class CopyInitialCondition:
         depths_sorted_indices = np.argsort(depths)
         depths_sorted = depths[depths_sorted_indices]
         vals_sorted = vals[depths_sorted_indices]
+        # Remove duplicates
+        unique_depths, unique_indices = np.unique(depths_sorted, return_index=True)
+        depths_sorted = unique_depths
+        vals_sorted = vals_sorted[unique_indices]
+        # Interpolation function
         f = interp1d(
             depths_sorted,
             vals_sorted,
             kind="linear",
             fill_value="extrapolate",
         )
-        return f(self.depth(sd.cell_centers))
+        depths_sd = self.depth(sd.cell_centers)
+        val = f(depths_sd)
+        # For depths outside the range of the initialization model, use the fallback values.
+        mask_lower = depths_sd < depths_sorted.min()
+        mask_upper = depths_sd > depths_sorted.max()
+        val[mask_lower] = fallback_vals[mask_lower]
+        val[mask_upper] = fallback_vals[mask_upper]
+        return val
+
+    @property
+    def use_ic_interpolation(self) -> bool:
+        return self.params.get("use_ic_interpolation", True)
 
     def ic_values_pressure(self, sd: pp.Grid) -> np.ndarray:
         if self.well_related_domain(sd):
-            return self.interpolate_initial_condition(sd, "pressure")
+            vals = self.hydrostatic_pressure(self.depth(sd.cell_centers))
+            if self.use_ic_interpolation:
+                vals = self.interpolate_initial_condition(sd, "pressure", vals)
+            return vals
         else:
             return self.copy_initial_conditions(sd, "pressure")
 
@@ -169,7 +190,10 @@ class CopyInitialCondition:
 
     def ic_values_temperature(self, sd: pp.Grid) -> np.ndarray:
         if self.well_related_domain(sd):
-            return self.interpolate_initial_condition(sd, "temperature")
+            vals = self.temperature_at_depth(self.depth(sd.cell_centers))
+            if self.use_ic_interpolation:
+                vals = self.interpolate_initial_condition(sd, "temperature", vals)
+            return vals
         else:
             return self.copy_initial_conditions(sd, "temperature")
 
