@@ -106,6 +106,36 @@ class SolutionStrategy:
         logger.info(f"Solved linear system in {time.time() - t_0:.2e} seconds.")
         return x
 
+    def update_discretization_parameters(self) -> None:
+        """Set default (unitary/zero) parameters for the energy problem.
+
+        The parameter fields of the data dictionaries are updated for all subdomains and
+        interfaces (of codimension 1). The data to be set is related to:
+
+        - The temperature diffusion, e.g., the thermal conductivity and boundary
+          conditions for the temperature. This applies to subdomains and interfaces.
+        - Boundary conditions for the conductive heat flux. This applies to subdomains
+          only.
+
+        """
+        super().update_discretization_parameters()
+        inverter = self.params.get("mpfa_inverter", "python")
+        for _, data in self.mdg.subdomains(return_data=True):
+            pp.initialize_data(
+                data,
+                self.fourier_keyword,
+                {
+                    "mpfa_inverter": inverter,
+                },
+            )
+            pp.initialize_data(
+                data,
+                self.darcy_keyword,
+                {
+                    "mpfa_inverter": inverter,
+                },
+            )
+
 
 class Foo:
     def before_nonlinear_iteration(self) -> None:

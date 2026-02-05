@@ -18,6 +18,7 @@ def plot_flow_rate_and_fracture_displacement(
     csv_dir: str = "conceptual_long_well_saved_data/well_monitoring",
     well_name: str = "2 Production well",
     file_base: str = "example_4_long_well",
+    fracture_names: Sequence[str] = ("Fracture 1", "Fracture 2"),
 ) -> None:
     """
     Plot fluid flux from production well and displacement jump of first two fractures.
@@ -58,7 +59,6 @@ def plot_flow_rate_and_fracture_displacement(
     # Dynamically get the first two unique fracture IDs, preserving order of first
     # occurrence. We pick out all but the first occurence, which corresponds to the
     # injection fracture.
-    fracture_names = fracture_data["fracture_id"].unique()[1:].tolist()
     fracture_data_filtered = fracture_data[
         fracture_data["fracture_id"].isin(fracture_names)
     ].copy()
@@ -108,7 +108,11 @@ def plot_flow_rate_and_fracture_displacement(
         fracture_subset = fracture_subset.iloc[inds].reset_index(drop=True)
         ax2.semilogy(
             time,
-            fracture_subset["displacement_jump"],
+            np.clip(
+                fracture_subset["displacement_jump"],
+                a_min=DISPLACEMENT_JUMP_Y_MIN,
+                a_max=None,
+            ),
             color=color,
             linewidth=2,
             markersize=4,
@@ -220,7 +224,11 @@ def plot_fracture_displacement(
         color = color_map.get(idx, f"C{idx}")
         ax.semilogy(
             fracture_subset["time"],
-            fracture_subset["displacement_jump"],
+            np.clip(
+                fracture_subset["displacement_jump"],
+                a_min=DISPLACEMENT_JUMP_Y_MIN,
+                a_max=None,
+            ),
             color=color,
             linewidth=2,
             marker="o",
@@ -535,10 +543,16 @@ class CosoExporter:
                     f"{self.params['data_folder_name']}/well_monitoring/"
                     + f"{self.params['file_name']}_{plt_name}{suffix}.png"
                 )
+        start = (
+            1
+            if np.isclose(self.params["fracture_params"]["strike_angles"][0], 0)
+            else 0
+        )
         plot_flow_rate_and_fracture_displacement(
             csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
             well_name=self.production_well_names[0],
             file_base=self.params["file_name"],
+            fracture_names=self.fracture_names()[start:],
         )
 
 
