@@ -15,10 +15,11 @@ DISPLACEMENT_JUMP_Y_MIN = 1e-10
 
 
 def plot_flow_rate_and_fracture_displacement(
-    csv_dir: str = "conceptual_long_well_saved_data/well_monitoring",
-    well_name: str = "2 Production well",
-    file_base: str = "example_4_long_well",
-    fracture_names: Sequence[str] = ("Fracture 1", "Fracture 2"),
+    csv_dir: str,
+    well_name: str,
+    file_base: str,
+    fracture_names,
+    title=None,
 ) -> None:
     """
     Plot fluid flux from production well and displacement jump of first two fractures.
@@ -133,9 +134,10 @@ def plot_flow_rate_and_fracture_displacement(
         framealpha=0.9,
         edgecolor="black",
     )
-
+    if title is None:
+        title = "Production Well Fluid Flux and Fracture Displacement Jump"
     plt.title(
-        "Production Well Fluid Flux and Fracture Displacement Jump",
+        title,
         fontsize=14,
         fontweight="bold",
     )
@@ -149,8 +151,10 @@ def plot_flow_rate_and_fracture_displacement(
 
 
 def plot_fracture_displacement(
-    csv_dir: str = "conceptual_saved_data/well_monitoring",
-    file_base: str = "example_3",
+    csv_dir: str,
+    file_base: str,
+    fracture_names,
+    title=None,
 ) -> None:
     """
     Plot displacement jump of fractures over time (for simulations without wells).
@@ -241,9 +245,11 @@ def plot_fracture_displacement(
     ax.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
     ax.legend(loc="best", fontsize=10, framealpha=0.9, edgecolor="black")
     ax.grid(True, alpha=0.3)
+    if title is None:
+        title = "Fracture Displacement Jump Over Time"
 
     plt.title(
-        "Fracture Displacement Jump Over Time",
+        title,
         fontsize=14,
         fontweight="bold",
     )
@@ -465,6 +471,7 @@ class CosoExporter:
             plot_fracture_displacement(
                 csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
                 file_base=self.params["file_name"],
+                title=self.create_plot_title(),
             )
             return
         well_names = self.injection_well_names + self.production_well_names
@@ -553,7 +560,11 @@ class CosoExporter:
             well_name=self.production_well_names[0],
             file_base=self.params["file_name"],
             fracture_names=self.fracture_names()[start:],
+            title=self.create_plot_title(),
         )
+
+    def create_plot_title(self) -> str | None:
+        return None
 
 
 class GeometryExporting:

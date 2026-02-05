@@ -1,3 +1,4 @@
+import re
 import time
 import pandas
 import porepy as pp
@@ -71,6 +72,35 @@ class BaseModel(
 ):
     """Model for the Coso geothermal reservoir."""
 
+    def create_plot_title(self) -> str | None:
+        """Generate a formatted plot title from folder name and simulation parameters.
+
+        Extracts simulation metadata from folder name (strike angle, fracture index, well status)
+        and formats it as a human-readable title. Fracture indices are incremented by 1 for
+        display purposes (0-indexed internally, 1-indexed for display).
+
+        Returns:
+            str | None: Formatted plot title with well status, strike angle, and fracture info.
+
+        Example:
+            Input folder_name: "case_II_with_wells_strike_35_tilted_fracture_0"
+            Output: "with wells strike 35 tilted fracture, Tilted, Strike: 1"
+        """
+        fn = self.params["folder_name"]
+
+        # The split returns ["example_7"] and [-1] gives "example_7" unchanged
+        suffix = fn.split("wells")[-1]
+        suffix = suffix.replace("_", " ").strip()
+
+        match = re.search(r"fracture\s*(\d+)", suffix)
+        if match:
+            fracture_index = int(match.group(1))
+            new_index = fracture_index + 1
+            suffix = re.sub(r"fracture\s*\d+", f"Fracture: {new_index}", suffix)
+        suffix = suffix.replace(" tilted", ", Tilted").replace("strike", "Strike:")
+
+        return suffix
+
 
 class InitializationModel(
     InitialConditionHydrostaticPressureValues,
@@ -106,8 +136,8 @@ if __name__ == "__main__":
     fracture_strike_angles = np.array(
         [
             45,
-            # 40,
-            # 35,
+            40,
+            35,
         ]
     )
     granodiorite_values["permeability"] = 3e-15
@@ -118,11 +148,11 @@ if __name__ == "__main__":
 
     well_options = [
         True,
-        # False,
+        False,
     ]
     angle_indices = [
-        0,  # Injection fracture
-        # 1,  # Central fracture
+        # 0,  # Injection fracture
+        1,  # Central fracture
         # 2,  # Production fracture
     ]
     for angle_index in angle_indices:
