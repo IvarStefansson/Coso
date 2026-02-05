@@ -2,6 +2,13 @@ import porepy as pp
 from typing import Callable, Any
 
 
+class DarcysLawAdEverywhere(
+    pp.constitutive_laws.DarcysLawAd,
+    pp.constitutive_laws.FouriersLawAd,
+):
+    pass
+
+
 class DarcysLawAd(pp.constitutive_laws.DarcysLawAd):
     def darcy_flux_discretization(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Discretization of the Darcy flux.

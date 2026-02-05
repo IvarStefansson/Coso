@@ -101,6 +101,8 @@ class ConstraintLineSearchNonlinearSolver(
 
 
 if __name__ == "__main__":
+    tp = True
+
     fracture_strike_angles = np.array(
         [
             45,
@@ -110,12 +112,13 @@ if __name__ == "__main__":
     )
     granodiorite_values["permeability"] = 3e-15
     granodiorite_values["residual_aperture"] = 1.0e-3
+    granodiorite_values["dilation_angle"] = 0.03
 
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
 
     well_options = [
         True,
-        False,
+        # False,
     ]
     angle_indices = [
         0,  # Injection fracture
@@ -130,12 +133,12 @@ if __name__ == "__main__":
                     suffix = "_with_wells"
                 else:
                     suffix = "_without_wells"
-                suffix += f"_strike_{int(strike)}_index_{angle_index}"
+                suffix += f"_strike_{int(strike)}_tilted_fracture_{angle_index}"
 
                 logger.info(f"Starting the simulation with suffix {suffix}")
                 dt = 1e2
-                production_period = 3 * pp.YEAR
-                shut_in_duration = 2 * pp.DAY
+                production_period = 2 * pp.YEAR
+                shut_in_duration = 1 * pp.DAY
                 schedule = np.array(
                     [
                         0,
@@ -216,7 +219,7 @@ if __name__ == "__main__":
                         temperature=350.0,
                         #     pressure=pp.BAR,
                     ),
-                    "thermal_gradient": 5e-2,
+                    "thermal_gradient": 5e-2,  # Test 7e-2
                     "fracture_file": "coords.txt",
                     "folder_name": folder_name_init,
                     "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
@@ -226,10 +229,12 @@ if __name__ == "__main__":
                         ),
                         "strike_angles": strike_angles,
                     },
+                    "darcy_flux_discretization": "tpfa" if tp else "mpfa",
+                    "fourier_flux_discretization": "tpfa" if tp else "mpfa",
                 }
                 model_params = copy.deepcopy(model_params_init)
                 # Reduce target pressure in favour of displacement BC as driving force?
-                injection_pressures = np.full(schedule.shape, 10 * pp.MEGA * pp.PASCAL)
+                injection_pressures = np.full(schedule.shape, 3 * pp.MEGA * pp.PASCAL)
                 injection_pressures[0] = 1 * pp.MEGA * pp.PASCAL  # Initial pressure
                 injection_pressures[:1] = 1 * pp.ATMOSPHERIC_PRESSURE
 
@@ -249,7 +254,7 @@ if __name__ == "__main__":
                     "nl_convergence_tol_res": 1e-1,
                     "nl_convergence_tol": 1e-3,
                     "nl_divergence_tol": 1e20,
-                    "max_iterations": 20,
+                    "max_iterations": 15,
                     "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
                     "local_line_search": 1,
                     "global_line_search": 0,

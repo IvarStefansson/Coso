@@ -4,12 +4,14 @@ import porepy as pp
 import numpy as np
 from geometry import CoolingGeometry
 from material_parameters import granodiorite_values
+from porepy.applications.test_utils.models import add_mixin
 
 from physical_model import PhysicalModel
 from boundary_conditions import (
     CosoBoundaryConditionsDisplacement,
     NeumannWellBCsFromSchedule,
 )
+from porepy.applications.discretizations.flux_discretization import FluxDiscretization
 
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
     BoundaryConditionsMechanicsNeumann,
@@ -39,27 +41,23 @@ import copy
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-
-if not logger.hasHandlers():
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+logging.basicConfig(
+    level=logging.INFO,
+    filename="coso.log",
+    filemode="w",
+    format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+)
 
 
 class BaseModel(
     FractureDeformationExporting,
     IterationExporting,
-    ResidualExporting,
+    # ResidualExporting,
     GeometryExporting,
     CosoExporter,
     CoolingGeometry,
-    # pp.poromechanics.TpsaPoromechanicsMixin,
-    # diff_tpfa.DarcysLawAdEverywhere,
+    FluxDiscretization,
+    pp.poromechanics.TpsaPoromechanicsMixin,
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
     pp.models.solution_strategy.ContactIndicators,
@@ -101,21 +99,27 @@ class ConstraintLineSearchNonlinearSolver(
 
 
 if __name__ == "__main__":
+    tp = True
+    no_solid_expansion = True
     fracture_strike_angles = np.array(
         [
-            45,
-            40,
-            35,
+            # 45,
+            41,
+            # 35,
+            # 42,
+            # 38,
         ]
     )
     granodiorite_values["permeability"] = 2e-15
     granodiorite_values["residual_aperture"] = 1.0e-3
+    if no_solid_expansion:
+        granodiorite_values["thermal_expansion"] = 0.0
 
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
 
     well_options = [
-        False,
         True,
+        # False,
     ]
     for strike in fracture_strike_angles:
         for has_wells in well_options:
@@ -125,11 +129,24 @@ if __name__ == "__main__":
             else:
                 suffix = "_without_wells"
             suffix += f"_strike_{int(strike)}"
-
+            if tp:
+                suffix += "_tp"
+                # MainModel = add_mixin(diff_tpfa.DarcysLawAdEverywhere, MainModel)
+                # InitializationModel = add_mixin(
+                #     diff_tpfa.DarcysLawAdEverywhere, InitializationModel
+                # )
+                # MainModel = add_mixin(  # type: ignore
+                #     pp.poromechanics.TpsaPoromechanicsMixin, MainModel
+                # )
+                # InitializationModel = add_mixin(  # type: ignore
+                #     pp.poromechanics.TpsaPoromechanicsMixin, InitializationModel
+                # )
+            if no_solid_expansion:
+                suffix += "_no_solid_expansion"
             logger.info(f"Starting the simulation with suffix {suffix}")
             dt = 1e2
-            production_period = 1 * pp.YEAR
-            shut_in_duration = 2 * pp.DAY
+            production_period = 2 * pp.YEAR
+            shut_in_duration = 2 * pp.DAY  # reduce to 1 day?
             schedule = np.array(
                 [
                     0,
@@ -166,7 +183,7 @@ if __name__ == "__main__":
                 iter_max=20,
                 iter_optimal_range=(5, 12),
                 iter_relax_factors=(0.5, 2.0),
-                recomp_factor=0.3,
+                recomp_factor=0.1,
                 recomp_max=10,
             )
             dt_init = 10e9  # * pp.YEAR
@@ -205,7 +222,7 @@ if __name__ == "__main__":
                     temperature=350.0,
                     #     pressure=pp.BAR,
                 ),
-                "thermal_gradient": 6e-2,
+                "thermal_gradient": 7e-2,
                 "fracture_file": "coords.txt",
                 "folder_name": folder_name_init,
                 "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
@@ -215,10 +232,12 @@ if __name__ == "__main__":
                     ),
                     "strike_angles": np.deg2rad([0, strike, 45]),
                 },
+                "darcy_flux_discretization": "tpfa" if tp else "mpfa",
+                "fourier_flux_discretization": "tpfa" if tp else "mpfa",
             }
             model_params = copy.deepcopy(model_params_init)
             # Reduce target pressure in favour of displacement BC as driving force?
-            injection_pressures = np.full(schedule.shape, 5 * pp.MEGA * pp.PASCAL)
+            injection_pressures = np.full(schedule.shape, 8 * pp.MEGA * pp.PASCAL)
 
             production_pressures = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
             injection_temperatures = np.full(schedule.shape, 323.15)
