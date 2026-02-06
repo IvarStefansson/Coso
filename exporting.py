@@ -153,7 +153,6 @@ def plot_flow_rate_and_fracture_displacement(
 def plot_fracture_displacement(
     csv_dir: str,
     file_base: str,
-    fracture_names,
     title=None,
 ) -> None:
     """
@@ -472,6 +471,7 @@ class CosoExporter:
                 csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
                 file_base=self.params["file_name"],
                 title=self.create_plot_title(),
+
             )
             return
         well_names = self.injection_well_names + self.production_well_names
@@ -603,16 +603,30 @@ class GeometryExporting:
 
 
 if __name__ == "__main__":
-    suffix = "_long_well"
-    # suffix = ""
-    csv_dir = f"short_cold{suffix}_saved_data/well_monitoring"
-    well_name = "2 Production well"
-    file_base = f"example_4{suffix}"
+    # suffix = "_long_well"
+    # # suffix = ""
+    # csv_dir = f"short_cold{suffix}_saved_data/well_monitoring"
+    # well_name = "2 Production well"
+    # file_base = f"example_4{suffix}"
+    file_base = "example_7"
 
-    suffix = "_with_solid_expansion"
-    csv_dir = f"thermal{suffix}_saved_data/well_monitoring"
-    well_name = "2 Production well"
-    file_base = f"example_5{suffix}"
-    plot_flow_rate_and_fracture_displacement(
-        csv_dir=csv_dir, well_name=well_name, file_base=file_base
-    )
+    with_well_file_names = []
+    without_well_file_names = [
+        "case_II_without_wells_strike_45_tilted_fracture_0_saved_data/well_monitoring",
+        "case_II_without_wells_strike_45_tilted_fracture_1_saved_data/well_monitoring",
+    ]
+    titles = [
+        "Strike 45°, Tilted Fracture 1",
+        "Strike 45°, Tilted Fracture 2",
+    ]
+    for file_name in with_well_file_names:
+        plot_flow_rate_and_fracture_displacement(
+            csv_dir=file_name, well_name=well_name, file_base=file_base
+        )
+
+    for file_name, title in zip(without_well_file_names, titles):
+        plot_fracture_displacement(
+            csv_dir=file_name,
+            file_base=file_base,
+            title=title,
+        )
