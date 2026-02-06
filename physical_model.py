@@ -81,3 +81,18 @@ class PhysicalModel(
     # pp.MomentumBalance,
 ):
     """Model for the Coso geothermal reservoir."""
+    def matrix_porosity(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Porosity [-].
+
+        Parameters:
+            subdomains: List of subdomains where the porosity is defined.
+
+        Returns:
+            Cell-wise porosity operator [-].
+
+        """
+        # Inherit poromechanical porosity from base class.
+        phi = super().matrix_porosity(subdomains)
+        f_max = pp.ad.Function(pp.ad.maximum, "maximum_function")
+        f_max.set_name("max for porosity")
+        return f_max(phi, pp.ad.Scalar(1e-8))
