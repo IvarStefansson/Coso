@@ -44,7 +44,7 @@ logging.basicConfig(level=logging.INFO)
 
 if not logger.hasHandlers():
     handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
+    handler.setLevel(logging.INFO)
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
@@ -151,12 +151,14 @@ if __name__ == "__main__":
         False,
     ]
     angle_indices = [
-        # 0,  # Injection fracture
+        0,  # Injection fracture
         1,  # Central fracture
-        # 2,  # Production fracture
+        2,  # Production fracture
     ]
     for angle_index in angle_indices:
         for strike in fracture_strike_angles:
+            if strike == 45 and angle_index != 0:
+                continue  # Only run the 45 degree case for the injection fracture
             for has_wells in well_options:
                 tic = time.time()
                 if has_wells:
