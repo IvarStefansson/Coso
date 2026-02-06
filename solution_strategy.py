@@ -5,6 +5,7 @@ import scipy.sparse as sps
 import warnings
 import porepy as pp
 from functools import partial
+from porepy.applications.discretizations.flux_discretization import FluxDiscretization
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def clip_decorator(a: float, b: float):
     return decorator
 
 
-class SolutionStrategy:
+class SolutionStrategy(FluxDiscretization):
     def initial_condition(self) -> None:
         """Set initial conditions for the model.
         This method sets the initial conditions for the model by reading well data and
