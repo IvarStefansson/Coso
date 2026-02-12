@@ -1,6 +1,8 @@
 import logging
 from typing import Callable, Sequence
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.legend_handler import HandlerTuple
 import numpy as np
 import pandas as pd
 import porepy as pp
@@ -20,6 +22,7 @@ def plot_flow_rate_and_fracture_displacement(
     file_base: str,
     fracture_names,
     title=None,
+    temperature_schedule=None,
 ) -> None:
     """
     Plot fluid flux from production well and displacement jump of first two fractures.
@@ -48,15 +51,25 @@ def plot_flow_rate_and_fracture_displacement(
     # diverged time steps. We sort the data by time to ensure correct plotting.
     # Identify non-monotonic times.
 
-    i0 = 1  # Initial condition does not correspond to a converged solution.
+    i0 = 0  # Initial condition does not correspond to a converged solution.
     accepted_times = [time.iloc[i0]]
     inds = [i0]
-    for i, t in enumerate(time.iloc[i0:], start=i0):
-        if t > accepted_times[-1]:
-            accepted_times.append(t)
-            inds.append(i)
+    for i, t in enumerate(time.iloc[i0+1:], start=i0 + 1):
+        if t < accepted_times[-1]:
+            accepted_times.pop(-1)
+            inds.pop(-1)
+        accepted_times.append(t)
+        inds.append(i)
+    # Remove first time point if it corresponds to the initial condition (time=0) which does not
+    # correspond to a converged solution.
+    if accepted_times[0] == 0:
+        accepted_times.pop(0)
+        inds.pop(0)
+
     time = pd.Series(accepted_times)
     well_data_filtered = well_data_filtered.iloc[inds].reset_index(drop=True)
+    sign = 1 if "Production" in well_name else -1
+    well_data_filtered["fluid_flux_numeric"] *= sign
     # Dynamically get the first two unique fracture IDs, preserving order of first
     # occurrence. We pick out all but the first occurence, which corresponds to the
     # injection fracture.
@@ -68,24 +81,23 @@ def plot_flow_rate_and_fracture_displacement(
     fig, ax1 = plt.subplots(figsize=(12, 6))
 
     # Plot fluid flux on left axis
+    flux_colors = ["tab:red", "tab:purple", "tab:blue", "tab:purple"]
+    flux_linestyles = ["-", "--", "-.", "--"]
     color1 = "tab:blue"
+
     ax1.set_xlabel("Time (s)", fontsize=12)
     ax1.set_ylabel("Fluid Flux (kg/s)", color=color1, fontsize=12)
-    line1 = ax1.plot(
-        time,
-        well_data_filtered["fluid_flux_numeric"],
-        color=color1,
-        linewidth=2,
-        label="Fluid Flux in Production Well",
-    )
+
+
+
     ax1.tick_params(axis="y", labelcolor=color1)
 
     # Create right axis for fracture displacement
     ax2 = ax1.twinx()
     color2 = "tab:orange"
     color3 = "tab:green"
-    color4 = "tab:purple"
-    colors = [color2, color3]
+    color4 = "tab:gray"
+    colors = [color2, color3, color4]
     ax2.set_ylabel("Displacement Jump (m)", fontsize=12)
     if "example_4" in file_base:
         fracture_mapping = {
@@ -105,7 +117,7 @@ def plot_flow_rate_and_fracture_displacement(
     for fracture_name, color in zip(fracture_names, colors):
         fracture_subset = fracture_data_filtered[
             fracture_data_filtered["fracture_id"] == fracture_name
-        ].sort_values("time")
+        ]
         fracture_subset = fracture_subset.iloc[inds].reset_index(drop=True)
         ax2.semilogy(
             time,
@@ -122,18 +134,66 @@ def plot_flow_rate_and_fracture_displacement(
 
     ax2.tick_params(axis="y")
     ax2.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
-
+    if temperature_schedule is None:
+        line1 = ax1.plot(
+            time,
+            well_data_filtered["fluid_flux_numeric"],
+            color=color1,
+            linewidth=2,
+            label="Fluid Flux in Production Well",
+        )
+    else:
+        # Plot temperature with alternating colors for different schedule steps. We use
+        # red-blue-red-blue-... colors for the temperature to visually distinguish the
+        # schedule steps.
+        # line1 = ax1.plot(
+        #     time,
+        #     well_data_filtered["fluid_flux_numeric"],
+        #     color=color1,
+        #     linewidth=2,
+        #     label="Fluid Flux in Production Well",
+        # )
+        for i in range(len(temperature_schedule) - 1):
+            step_mask = (time >= temperature_schedule[i]) & (
+                time <= temperature_schedule[i + 1]
+            )
+            ax1.plot(
+                time[step_mask],
+                well_data_filtered["fluid_flux_numeric"][step_mask],
+                color=color1, #flux_colors[0],#[i % len(flux_colors)],
+                linestyle=flux_linestyles[i % len(flux_linestyles)],
+                linewidth=2,
+            )
+        line1 = ax1.get_lines()[: len(temperature_schedule) - 1]
     # Create combined legend
-    lines1 = line1
-    lines2 = ax2.get_lines()
-    ax1.legend(
-        lines1 + lines2,
-        [l.get_label() for l in lines1 + lines2],
-        loc="lower right",
-        fontsize=10,
-        framealpha=0.9,
-        edgecolor="black",
-    )
+    # Create custom legend handle with red and blue colors for fluid flux
+    if temperature_schedule is not None:
+        # red_line = Line2D([0], [0], color='tab:red', linewidth=2)
+        # purple_line = Line2D([0], [0], color='tab:purple', linewidth=2)
+        blue_line = Line2D([0], [0], color='tab:blue', linewidth=2)
+        fluid_flux_handle = (blue_line)
+        fluid_flux_label = "Fluid Flux in Production Well"
+        lines2 = ax2.get_lines()
+        ax1.legend(
+            [fluid_flux_handle] + lines2,
+            [fluid_flux_label] + [l.get_label() for l in lines2],
+            loc="lower right",
+            fontsize=10,
+            framealpha=0.9,
+            edgecolor="black",
+            handler_map={tuple: HandlerTuple(ndivide=None)},
+        )
+    else:
+        lines1 = line1
+        lines2 = ax2.get_lines()
+        ax1.legend(
+            lines1 + lines2,
+            [l.get_label() for l in lines1 + lines2],
+            loc="lower right",
+            fontsize=10,
+            framealpha=0.9,
+            edgecolor="black",
+        )
     if title is None:
         title = "Production Well Fluid Flux and Fracture Displacement Jump"
     plt.title(
@@ -177,8 +237,9 @@ def plot_fracture_displacement(
     accepted_times = [time.iloc[i0]]
 
     for i, t in enumerate(time.iloc[i0:], start=i0):
-        if t > accepted_times[-1]:
-            accepted_times.append(t)
+        if t < accepted_times[-1]:
+            accepted_times.pop(-1)
+        accepted_times.append(t)
 
     time = pd.Series(accepted_times)
 
@@ -219,7 +280,7 @@ def plot_fracture_displacement(
     for idx, fracture_name in enumerate(fracture_names):
         fracture_subset = fracture_data[
             fracture_data["fracture_id"] == fracture_name
-        ].sort_values("time")
+        ]
 
         # Filter to accepted times
         fracture_subset = fracture_subset[fracture_subset["time"].isin(accepted_times)]
@@ -302,6 +363,9 @@ class CosoExporter:
         """
         data = super().data_to_export()
         for sd in self.mdg.subdomains():
+            tensor = self.evaluate_and_scale([sd], "permeability", "m ^ 2")
+            perm = tensor.reshape(9, -1, order="F")
+            data.append((sd, "permeability_tensor", perm[0]))
             depth = self.depth(sd.cell_centers)
             data.append(
                 (
@@ -310,12 +374,28 @@ class CosoExporter:
                     self.units.convert_units(depth, "m"),
                 )
             )
+            density = self.fluid.density([sd]).value(self.equation_system)
+            data.append(
+                (
+                    sd,
+                    "density",
+                    self.units.convert_units(density, "kg * m^-3"),
+                )
+            )
             if sd.dim == self.nd - 1:
                 data.append(
                     (
                         sd,
                         "fracture_name",
                         np.full(sd.num_cells, sd.frac_num),
+                    )
+                )
+            elif sd.dim == self.nd:
+                data.append(
+                    (
+                        sd,
+                        "porosity",
+                        self.evaluate_and_scale([sd], "porosity", "-"),
                     )
                 )
             if hasattr(self, "hydrostatic_pressure"):
@@ -340,14 +420,11 @@ class CosoExporter:
                 data.append((sd, "fluid_flux_vector", cell_flux.ravel("F")))
         for sd in self.mdg.subdomains():
             if not self.is_well_grid(sd):
-                continue
-            if hasattr(self, "open_well_cells"):
-                vals = self.evaluate_and_scale([sd], "open_well_cells", "-")
-                data.append((sd, "open_well_cells", vals))
-
-            well = self.parent_well(sd)
-            well_tag = int(well.tags["well_name"][:2])
-            data.append((sd, "well_name", np.full(sd.num_cells, well_tag)))
+                data.append((sd, "well_name", np.full(sd.num_cells, -1)))
+            else:
+                well = self.parent_well(sd)
+                well_tag = int(well.tags["well_name"][:2])
+                data.append((sd, "well_name", np.full(sd.num_cells, well_tag)))
         return data
 
     def collect_data(self) -> dict:
@@ -365,10 +442,13 @@ class CosoExporter:
             data = {}
         sds = self.mdg.subdomains(dim=self.nd - 2)
         face_offsets = np.cumsum([0] + [sd.num_faces for sd in sds])
-        pressure = self.evaluate_and_scale(sds, "pressure_trace", "Pa")
+        cell_offsets = np.cumsum([0] + [sd.num_cells for sd in sds])
+        pressure_trace = self.evaluate_and_scale(sds, "pressure_trace", "Pa")
+        pressure = self.evaluate_and_scale(sds, "pressure", "Pa")
+
         has_t = hasattr(self, "temperature_trace")
         if has_t:
-            temperature = self.evaluate_and_scale(sds, "temperature_trace", "K")
+            temperature = self.evaluate_and_scale(sds, "temperature", "K")
             enthalpy_f = self.evaluate_and_scale(sds, "enthalpy_flux", "W * m^-2")
 
         darcy_f = self.evaluate_and_scale(sds, "darcy_flux", "m^3 *s ^-1")
@@ -387,7 +467,7 @@ class CosoExporter:
             flux_sign = np.sign(sd.face_normals[-1, top_faces])
 
             data[parent_well.tags["well_name"]] = {
-                "pressure": pressure[face_offsets[id] : face_offsets[id + 1]][
+                "pressure": pressure_trace[face_offsets[id] : face_offsets[id + 1]][
                     top_faces
                 ][0],
                 "darcy_flux": darcy_f[face_offsets[id] : face_offsets[id + 1]][
@@ -400,11 +480,10 @@ class CosoExporter:
                 ),
             }
             if has_t:
+                top_cell = np.argsort(self.depth(sd.cell_centers))[0]
                 data[parent_well.tags["well_name"]].update(
                     {
-                        "temperature": temperature[
-                            face_offsets[id] : face_offsets[id + 1]
-                        ][top_faces][0],
+                        "temperature": temperature[cell_offsets[id] : cell_offsets[id + 1]][top_cell],
                         "enthalpy_flux": enthalpy_f[
                             face_offsets[id] : face_offsets[id + 1]
                         ][top_faces][0]
@@ -462,7 +541,7 @@ class CosoExporter:
         self.well_monitoring_data = df
         self.fracture_monitoring_data = df_fractures
 
-    def plot_well_monitoring(self) -> None:
+    def plot_well_monitoring(self, temperature_schedule=None) -> None:
         """Plot well monitoring data for a given well."""
         if not hasattr(self, "well_monitoring_data"):
             self.save_results()
@@ -561,6 +640,7 @@ class CosoExporter:
             file_base=self.params["file_name"],
             fracture_names=self.fracture_names()[start:],
             title=self.create_plot_title(),
+            temperature_schedule=temperature_schedule,
         )
 
     def create_plot_title(self) -> str | None:
@@ -610,7 +690,12 @@ if __name__ == "__main__":
     # file_base = f"example_4{suffix}"
     file_base = "example_7"
 
-    with_well_file_names = []
+    with_well_file_names = [
+        "case_III_with_wells_strike_-41_tilted_fracture_1_saved_data/well_monitoring",
+    ]
+    with_well_titles = [
+        "Strike 41°, Tilted Fracture 2",
+    ]
     without_well_file_names = [
         "case_II_without_wells_strike_45_tilted_fracture_0_saved_data/well_monitoring",
         "case_II_without_wells_strike_45_tilted_fracture_1_saved_data/well_monitoring",
@@ -619,14 +704,42 @@ if __name__ == "__main__":
         "Strike 45°, Tilted Fracture 1",
         "Strike 45°, Tilted Fracture 2",
     ]
+    transition_time  = pp.HOUR
+    # Alternate between warm and cold injection every period, with a short
+    # transition time in between to allow for convergence without too large
+    # jumps in the solution. The schedule defines the time points at which
+    # the boundary conditions change.
+    period = 100 * pp.DAY
+    schedule = np.array(
+        [
+            0,
+            1 * period - transition_time,  # End of first warm injection
+            1 * period,  # Start of first cold period
+            2 * period - transition_time,  # End of first cold period
+            2 * period,  # Start of second warm injection
+            3 * period - transition_time,  # End of second warm injection
+            3 * period,  # Start of second cold period
+            4 * period - transition_time,  # End of second cold period
+            # 4 * period,
+        ],
+    )
     for file_name in with_well_file_names:
+        # plot_flow_rate_and_fracture_displacement(
+        #     csv_dir=file_name, well_name="2 Production well", file_base="example_8",
+        #     fracture_names=["Fracture 1", "Fracture 2", "Fracture 3"],
+        #     title=with_well_titles[0],
+        #     temperature_schedule=schedule,
+        # )
         plot_flow_rate_and_fracture_displacement(
-            csv_dir=file_name, well_name=well_name, file_base=file_base
+            csv_dir=file_name, well_name="1 Injection well", file_base="example_8",
+            fracture_names=["Fracture 1", "Fracture 2", "Fracture 3"],
+            title=with_well_titles[0],
+            temperature_schedule=schedule,
         )
 
-    for file_name, title in zip(without_well_file_names, titles):
-        plot_fracture_displacement(
-            csv_dir=file_name,
-            file_base=file_base,
-            title=title,
-        )
+    # for file_name, title in zip(without_well_file_names, titles):
+    #     plot_fracture_displacement(
+    #         csv_dir=file_name,
+    #         file_base=file_base,
+    #         title=title,
+    #     )
