@@ -454,16 +454,18 @@ class CoolingGeometry(TwoEllipticFractures3d):
         #  0 injection,
         #  1 production,
         #  2 production or passive, depending on length of well.
-        dx = self.domain_sizes()[0] / 12
+        params = self.params["fracture_params"]
+
+        dx = params.get("dx", self.domain_sizes()[0] / 14)
         y = self.domain_sizes()[1] / 2
         z = -self.domain_sizes()[2] / 2
-        x = self.domain_sizes()[0] * 5 / 12
+        x = self.domain_sizes()[0] * 6 / 14
 
-        num_points = 15
 
         center_injection = np.array([x, y, z])
-        params = self.params["fracture_params"]
         r = params.get("fracture_major_axes")
+        num_points = params.get("num_points", 14)
+
         self._fractures = [  # First the injection fracture
             pp.create_elliptic_fracture(
                 center=center_injection,
@@ -506,15 +508,27 @@ class CoolingGeometry(TwoEllipticFractures3d):
         """Assign well network class."""
         if not self.params.get("use_wells", True):
             return super().set_well_network()
-        dx = self.domain_sizes()[0] / 12
+        dx = self.domain_sizes()[0] / 14
         y = self.domain_sizes()[1] / 2
-        dy = self.domain_sizes()[1] / 5
+        dy = self.domain_sizes()[1] / 2000
         z = -self.domain_sizes()[2] / 2
-        x = self.domain_sizes()[0] * 5 / 12
+        x = self.domain_sizes()[0] * 6 / 14
         x_inj = np.array([[x, x, x]])
         x_prod = x_inj + 2 * dx
         y_both = np.array([[y + dy, y + dy, y - dy]])
         z_both = np.array([[0, z, z]])
+        pts_prod = np.vstack([x_prod, y_both, z_both])
+        # Create a well object.
+        well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
+        # y_inj = np.full((1, 3), y_max - 5e3)
+        # z_inj = np.array([[0, z, z]])
+        pts_inj = np.vstack([x_inj, y_both, z_both])
+
+
+        x_inj = np.array([[x, x]])
+        x_prod = x_inj + 2 * dx
+        y_both = np.array([[y + 2 * dy, y - dy]])
+        z_both = np.array([[0, 1.5 * z]])
         pts_prod = np.vstack([x_prod, y_both, z_both])
         # Create a well object.
         well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
@@ -527,7 +541,7 @@ class CoolingGeometry(TwoEllipticFractures3d):
         )  # 68 20rd
         wells = [well_inj, well_prod]
         self.well_network = pp.WellNetwork3d(
-            domain=self._domain, wells=wells, parameters={"mesh_size": 250.0}
+            domain=self._domain, wells=wells, parameters={"mesh_size": 150.0}
         )
 
 

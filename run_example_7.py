@@ -6,7 +6,7 @@ import numpy as np
 from geometry import CoolingGeometry
 from material_parameters import granodiorite_values
 
-from physical_model import PhysicalModel
+from physical_model import PhysicalModel, HeterogeneousPermeabilitySpecification
 from boundary_conditions import (
     CosoBoundaryConditionsDisplacement,
     NeumannWellBCsFromSchedule,
@@ -61,6 +61,7 @@ class BaseModel(
     CoolingGeometry,
     # pp.poromechanics.TpsaPoromechanicsMixin,
     # diff_tpfa.DarcysLawAdEverywhere,
+    HeterogeneousPermeabilitySpecification,
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
     pp.models.solution_strategy.ContactIndicators,
@@ -135,14 +136,18 @@ if __name__ == "__main__":
 
     fracture_strike_angles = np.array(
         [
-            45,
-            40,
-            35,
+            # 45,
+            # 43,
+            41,
+            # 39,
+            # 40,
+            # 35,
         ]
     )
-    granodiorite_values["permeability"] = 3e-15
+    granodiorite_values["permeability"] = 2e-16
     granodiorite_values["residual_aperture"] = 1.0e-3
-    granodiorite_values["dilation_angle"] = 0.03
+    granodiorite_values["dilation_angle"] = 0 # np.deg2rad(1)
+    granodiorite_values["porosity"] = 0.02
 
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
 
@@ -151,14 +156,16 @@ if __name__ == "__main__":
         False,
     ]
     angle_indices = [
-        0,  # Injection fracture
+        # 0,  # Injection fracture
         1,  # Central fracture
-        2,  # Production fracture
+        # 2,  # Production fracture
     ]
     for angle_index in angle_indices:
         for strike in fracture_strike_angles:
             if strike == 45 and angle_index != 0:
-                continue  # Only run the 45 degree case for the injection fracture
+                # All fractures are the same at 45 degrees, so we only need to run one
+                # case.
+                continue
             for has_wells in well_options:
                 tic = time.time()
                 if has_wells:
@@ -169,30 +176,32 @@ if __name__ == "__main__":
 
                 logger.info(f"Starting the simulation with suffix {suffix}")
                 dt = 1e2
-                production_period = 2 * pp.YEAR
+                production_period = 3 * pp.YEAR
                 shut_in_duration = 1 * pp.DAY
                 schedule = np.array(
                     [
                         0,
-                        # pp.HOUR,
-                        pp.DAY,  # Initial period of stabilization and pressure ramp-up
+
+                        pp.HOUR,
+                        # pp.DAY,  # Initial period of stabilization and pressure ramp-up
                         1 * production_period - shut_in_duration,  # First shut-in
                         1 * production_period,  # Restart operation
                         2 * production_period - shut_in_duration,  # Second shut-in
                         2 * production_period,  # End second shut-in
                         3 * production_period - shut_in_duration,  # Third shut-in
                         3 * production_period,
-                        # 4 * production_period - shut_in_duration,  # First shut-in
-                        # 4 * production_period,
+                        4 * production_period - shut_in_duration,  # First shut-in
+                        4 * production_period,
                         # 5 * production_period - shut_in_duration,  # Fifth shut-in
                         # 5 * production_period,  # End fifth shut-in
                     ]
                 )
 
                 if has_wells:
+                    offset = 2 if schedule[1] < 2 * pp.DAY else 1
                     neumann_intervals = [
                         # (schedule[2 * i], schedule[2 * i + 1])
-                        (schedule[2 * i + 2], schedule[2 * i + 3])
+                        (schedule[2 * i + offset], schedule[2 * i + offset + 1])
                         for i in range(schedule.size // 2 - 1)
                     ]
                 else:
@@ -210,7 +219,7 @@ if __name__ == "__main__":
                     iter_max=20,
                     iter_optimal_range=(5, 12),
                     iter_relax_factors=(0.5, 2.0),
-                    recomp_factor=0.3,
+                    recomp_factor=0.2,
                     recomp_max=10,
                 )
                 dt_init = 50e8  # * pp.YEAR
@@ -221,9 +230,9 @@ if __name__ == "__main__":
                     constant_dt=True,
                 )
                 fracture_size = 4e2
-                cell_size = 18e2
+                cell_size = 14e2
 
-                folder_name = "case_II" + suffix
+                folder_name = "case_2" + suffix
                 folder_name_init = folder_name + "_initialization"
                 file_name = "example_7"
                 data_folder_name = f"{folder_name}_saved_data"
@@ -240,7 +249,7 @@ if __name__ == "__main__":
                     "grid_type": "simplex",
                     "meshing_arguments": {
                         "cell_size": cell_size,
-                        "cell_size_fracture": 0.7 * fracture_size,
+                        "cell_size_fracture": 0.5 * fracture_size,
                     },
                     "file_name": file_name,
                     "data_folder_name": data_folder_name,
@@ -248,10 +257,10 @@ if __name__ == "__main__":
                     "initialization": True,
                     "use_wells": False,
                     "reference_variable_values": pp.ReferenceVariableValues(
-                        temperature=350.0,
+                        temperature=300.0,
                         #     pressure=pp.BAR,
                     ),
-                    "thermal_gradient": 5e-2,  # Test 7e-2
+                    "thermal_gradient": 70e-3,  # Test 7e-2
                     "fracture_file": "coords.txt",
                     "folder_name": folder_name_init,
                     "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
@@ -263,16 +272,20 @@ if __name__ == "__main__":
                     },
                     "darcy_flux_discretization": "tpfa" if tp else "mpfa",
                     "fourier_flux_discretization": "tpfa" if tp else "mpfa",
+                    "heterogeneous_permeability": True,
                 }
                 model_params = copy.deepcopy(model_params_init)
                 # Reduce target pressure in favour of displacement BC as driving force?
-                injection_pressures = np.full(schedule.shape, 3 * pp.MEGA * pp.PASCAL)
-                injection_pressures[0] = 1 * pp.MEGA * pp.PASCAL  # Initial pressure
-                injection_pressures[:1] = 1 * pp.ATMOSPHERIC_PRESSURE
+                injection_pressures = np.full(schedule.shape, 2 * pp.MEGA * pp.PASCAL)
+                # injection_pressures = np.full(schedule.shape, 10* pp.ATMOSPHERIC_PRESSURE)
+                # injection_pressures[0] = .5 * pp.MEGA * pp.PASCAL  # Initial pressure
+                # injection_pressures[:1] = 1 * pp.ATMOSPHERIC_PRESSURE
 
                 production_pressures = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
-                injection_temperatures = np.full(schedule.shape, 323.15)
-                production_temperatures = np.full(schedule.shape, 323.15)
+
+                # production_pressures = 0.5 * pp.ATMOSPHERIC_PRESSURE
+                injection_temperatures = np.full(schedule.shape, pp.Celsius_to_Kelvin(10))
+                production_temperatures = np.full(schedule.shape, pp.Celsius_to_Kelvin(150))
                 # Can be refined to have different schedules for each well.
                 for name in MainModel.injection_well_names.fget(None):
                     model_params[f"{name}_pressures"] = injection_pressures
