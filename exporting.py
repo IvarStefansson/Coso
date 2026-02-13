@@ -634,9 +634,10 @@ class CosoExporter:
             if np.isclose(self.params["fracture_params"]["strike_angles"][0], 0)
             else 0
         )
+        well_ind = 1 if "example_8" in self.params["file_name"] else 0
         plot_flow_rate_and_fracture_displacement(
             csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
-            well_name=self.production_well_names[0],
+            well_name=self.production_well_names[well_ind],
             file_base=self.params["file_name"],
             fracture_names=self.fracture_names()[start:],
             title=self.create_plot_title(),

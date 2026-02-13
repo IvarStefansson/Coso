@@ -1,3 +1,4 @@
+from typing import cast
 import numpy as np
 import porepy as pp
 
@@ -72,6 +73,140 @@ class CosoBackgroundValues:
         return values
 
 
+class HeterogeneousPermeabilitySpecification:
+    def matrix_permeability(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Permeability [m^2].
+
+        Parameters:
+            subdomains: List of subdomains where the permeability is defined.
+
+        Returns:
+            Cell-wise permeability operator [m^2].
+
+        """
+        if not self.params.get("heterogeneous_permeability", False):
+            return super().matrix_permeability(subdomains)
+        if len(subdomains) == 0:
+            return pp.wrap_as_dense_ad_array(0, size=0)
+        cc = np.hstack([sd.cell_centers for sd in subdomains])
+        size = sum(sd.num_cells for sd in subdomains)
+        vals = self.solid.permeability * np.ones(size)
+        high_perm_zones = self._high_perm_zones(cc)
+        # Set permeability in the high permeability zones.
+        vals[high_perm_zones] *= 8
+        permeability = pp.wrap_as_dense_ad_array(
+            vals, size, name="heterogeneous_permeability"
+        )
+        return self.isotropic_second_order_tensor(subdomains, permeability)
+
+    def _high_perm_zones(self, cc: np.ndarray) -> np.ndarray:
+        """Identify high permeability zones. Set to central box of size 1/3 of domain.
+
+        Parameters:
+            cc: Cell centers.
+
+        Returns:
+            Boolean array indicating which cells are in the high permeability zones.
+        """
+        dx, dy, dz = self.domain_sizes()
+
+        zone_x = np.logical_and(cc[0, :] > dx / 3, cc[0, :] < 2 * dx / 3)
+        zone_y = np.logical_and(cc[1, :] > dy / 3, cc[1, :] < 2 * dy / 3)
+        zone_z = np.logical_and(-cc[2, :] > dz / 3, -cc[2, :] < 2 * dz / 3)
+        return np.logical_and.reduce((zone_x, zone_y, zone_z))
+
+
+class FluidExtensions:
+    def viscosity_of_phase(
+        self, phase: pp.Phase[pp.FluidComponent]
+    ) -> pp.compositional.compositional_mixins.ExtendedDomainFunctionType:
+        """Mixin method for :class:`~porepy.compositional.compositional_mixins.
+        FluidMixin` to provide a viscosity exponential law for the fluid's phase.
+
+        .. math::
+            \\mu = 2.414e-5 * 10^(247.8 / (T - 140))
+
+
+        The reference viscosity and the pressure coefficient are taken from the material
+        constants of the reference component, while the reference pressure is accessible
+        by mixin; a typical implementation will provide this in a variable class.
+
+        Parameters:
+            phase: The single fluid phase.
+
+        Returns:
+            A function representing above expression on some domains.
+
+        """
+
+        def mu(domains: pp.SubdomainsOrBoundaries) -> pp.ad.Operator:
+            A = pp.ad.Scalar(
+                self.units.convert_units(2.414e-5, "Pa * s"),
+                "reference_fluid_viscosity",
+            )
+            B = pp.ad.Scalar(
+                self.units.convert_units(247.8, "K"),
+                "temperature_coefficient_for_viscosity",
+            )
+            C = pp.ad.Scalar(
+                self.units.convert_units(140, "K"), "temperature_offset_for_viscosity"
+            )
+            T = self.temperature(domains)
+            mu_ = A * pp.ad.Scalar(10, "exponent_base") ** (B / (T - C))
+            return mu_
+
+        return mu
+
+    def ___density_of_phase(self, phase: pp.Phase) -> pp.ExtendedDomainFunctionType:
+        """Mixin method for :class:`~porepy.compositional.compositional_mixins.
+        FluidMixin` to provide a density exponential law for the fluid's phase.
+
+        .. math::
+            \\rho = \\rho_0 \\exp \\left[ c_p \\left(p - p_0\\right) \\right]
+
+        The reference density and the compressibility are taken from the material
+        constants of the reference component, while the reference pressure is accessible
+        by mixin; a typical implementation will provide this in a variable class.
+
+        Parameters:
+            phase: The single fluid phase.
+
+        Returns:
+            A function representing above expression on some domains.
+
+        """
+
+        def rho(domains: pp.SubdomainsOrBoundaries) -> pp.ad.Operator:
+            temperature = self.temperature(domains) - pp.ad.Scalar(
+                pp.Celsius_to_Kelvin(20), "temperature_for_density"
+            )
+            rho_ref = (
+                pp.ad.Scalar(
+                    self.units.convert_units(1000, "kg*m^-3"), "reference_fluid_density"
+                )
+                - pp.ad.Scalar(
+                    self.units.convert_units(0.07, "kg*m^-3*K^-1"),
+                    "temperature_coefficient_for_density",
+                )
+                * temperature
+                - pp.ad.Scalar(
+                    self.units.convert_units(0.0002, "kg*m^-3*K^-2"),
+                    "temperature_squared_coefficient_for_density",
+                )
+                * temperature
+                * temperature
+            )
+            dp = self.perturbation_from_reference("pressure", domains)
+
+            # Wrap compressibility from fluid class as matrix (left multiplication with dp).
+            c = self.fluid_compressibility(domains)
+            rho_ = rho_ref * (pp.ad.Scalar(1) + c * dp)
+            rho_.set_name("fluid_density_from_pressure_and_temperature")
+            return rho_
+
+        return rho
+
+
 class PhysicalModel(
     # CosoBackgroundValues,
     pp.constitutive_laws.GravityForce,
@@ -81,6 +216,7 @@ class PhysicalModel(
     # pp.MomentumBalance,
 ):
     """Model for the Coso geothermal reservoir."""
+
     def matrix_porosity(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Porosity [-].
 
@@ -95,4 +231,8 @@ class PhysicalModel(
         phi = super().matrix_porosity(subdomains)
         f_max = pp.ad.Function(pp.ad.maximum, "maximum_function")
         f_max.set_name("max for porosity")
-        return f_max(phi, pp.ad.Scalar(1e-8))
+        eps = 1e-8
+        lower_bounded = f_max(phi, pp.ad.Scalar(eps))
+        m = pp.ad.Scalar(-1)
+        both_bounded = m * f_max(phi * m, pp.ad.Scalar(eps - 1))
+        return both_bounded
