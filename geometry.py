@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+from numpy.typing import NDArray
 import porepy as pp
 import pandas as pd
 from save_fracture_coords import (
@@ -254,17 +255,30 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         if not self.params.get("use_wells", True):
             return super().set_well_network()
         # Read well network from file.
-        s = self.domain_size() / 3.0
-        x_prod = np.full((1, 3), -1.0)
-        y_prod = np.array([[2, 2, self.params.get("production_well_z_endpoint", -1.5)]])
-        z_prod = np.array([[0, -3, -3]])
-        pts_prod = np.vstack([x_prod, y_prod, z_prod]) * s
+        dx = self.domain_sizes()[0] / 4
+        y_mid = self.domain_sizes()[1] / 2
+        dy = self.domain_sizes()[1] / 8
+        z = -self.domain_sizes()[2]
+        x = self.domain_sizes()[0] / 8 * 3
+
+        x_prod = np.full((1, 3), x)
+        y_prod = np.array(
+            [
+                [
+                    y_mid + dy + 10,
+                    y_mid + dy + 10,
+                    self.params["production_well_y_endpoint"],
+                ]
+            ]
+        )
+        z_prod = np.array([[0, z / 2, z / 2]])
+        pts_prod = np.vstack([x_prod, y_prod, z_prod])
         # Create a well object.
         well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
-        x_inj = np.full((1, 3), 1)
-        y_inj = np.array([[2, 2, -1.5]])
-        z_inj = np.array([[0, -3, -3]])
-        pts_inj = np.vstack([x_inj, y_inj, z_inj]) * s
+        x_inj = np.full((1, 2), x + dx)
+        y_inj = np.array([[y_mid + 2, y_mid - 1]])
+        z_inj = np.array([[0, 2 / 3 * z]])
+        pts_inj = np.vstack([x_inj, y_inj, z_inj])
         # Create a well object.
         well_inj = pp.Well(
             pts_inj, tags={"well_name": self.injection_well_names[0]}
@@ -276,21 +290,6 @@ class ConceptualGeometry(TwoEllipticFractures3d):
             parameters={"mesh_size": self.params["meshing_arguments"]["cell_size"] / 2},
         )
 
-    def domain_size(self) -> float:
-        return self.units.convert_units(self.params.get("domain_size", 3.0e3), "m")
-
-    def set_domain(self):
-        s = self.domain_size()
-        box = {
-            "xmin": -s,
-            "xmax": s,
-            "ymin": -s,
-            "ymax": s,
-            "zmin": -2 * s,
-            "zmax": 0e2,
-        }
-        self._domain = pp.Domain(bounding_box=box)
-
     def fracture_names(self) -> list[str]:
         return ["Fracture 1", "Fracture 2", "Fracture 3"]
 
@@ -300,11 +299,14 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         #  0 injection,
         #  1 production,
         #  2 production or passive, depending on length of well.
-        s = self.domain_size() / 3.0
-
+        dx = self.domain_sizes()[0] / 4
+        y_mid = self.domain_sizes()[1] / 2
+        dy = self.domain_sizes()[1] / 8
+        z = -self.domain_sizes()[2] / 2
+        x = self.domain_sizes()[0] / 8 * 3
         num_points = 15
 
-        center_injection = s * np.array([1.0, 0, -3.0])
+        center_injection = np.array([x + dx, y_mid, z])
         # Create a single elliptic fracture
         self._fractures = [  # First the injection fracture
             pp.create_elliptic_fracture(
@@ -318,7 +320,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
             )
         ]
 
-        center = s * np.array([-1.0, 1.0, -3.0])
+        center = np.array([x, y_mid + dy, z])
         # Production fracture, always connected.
         self._fractures.append(
             pp.create_elliptic_fracture(
@@ -331,7 +333,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 num_points=num_points,
             )
         )
-        center = s * np.array([-1.0, -1.0, -3.0])
+        center = np.array([x, y_mid - dy, z])
         # Production or passive fracture, connected for long well.
         self._fractures.append(
             pp.create_elliptic_fracture(
@@ -461,7 +463,6 @@ class CoolingGeometry(TwoEllipticFractures3d):
         z = -self.domain_sizes()[2] / 2
         x = self.domain_sizes()[0] * 6 / 14
 
-
         center_injection = np.array([x, y, z])
         r = params.get("fracture_major_axes")
         num_points = params.get("num_points", 14)
@@ -523,7 +524,6 @@ class CoolingGeometry(TwoEllipticFractures3d):
         # y_inj = np.full((1, 3), y_max - 5e3)
         # z_inj = np.array([[0, z, z]])
         pts_inj = np.vstack([x_inj, y_both, z_both])
-
 
         x_inj = np.array([[x, x]])
         x_prod = x_inj + 2 * dx
