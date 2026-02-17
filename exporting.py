@@ -54,7 +54,7 @@ def plot_flow_rate_and_fracture_displacement(
     i0 = 0  # Initial condition does not correspond to a converged solution.
     accepted_times = [time.iloc[i0]]
     inds = [i0]
-    for i, t in enumerate(time.iloc[i0+1:], start=i0 + 1):
+    for i, t in enumerate(time.iloc[i0 + 1 :], start=i0 + 1):
         if t < accepted_times[-1]:
             accepted_times.pop(-1)
             inds.pop(-1)
@@ -87,8 +87,6 @@ def plot_flow_rate_and_fracture_displacement(
 
     ax1.set_xlabel("Time (s)", fontsize=12)
     ax1.set_ylabel("Fluid Flux (kg/s)", color=color1, fontsize=12)
-
-
 
     ax1.tick_params(axis="y", labelcolor=color1)
 
@@ -160,7 +158,7 @@ def plot_flow_rate_and_fracture_displacement(
             ax1.plot(
                 time[step_mask],
                 well_data_filtered["fluid_flux_numeric"][step_mask],
-                color=color1, #flux_colors[0],#[i % len(flux_colors)],
+                color=color1,  # flux_colors[0],#[i % len(flux_colors)],
                 linestyle=flux_linestyles[i % len(flux_linestyles)],
                 linewidth=2,
             )
@@ -170,8 +168,8 @@ def plot_flow_rate_and_fracture_displacement(
     if temperature_schedule is not None:
         # red_line = Line2D([0], [0], color='tab:red', linewidth=2)
         # purple_line = Line2D([0], [0], color='tab:purple', linewidth=2)
-        blue_line = Line2D([0], [0], color='tab:blue', linewidth=2)
-        fluid_flux_handle = (blue_line)
+        blue_line = Line2D([0], [0], color="tab:blue", linewidth=2)
+        fluid_flux_handle = blue_line
         fluid_flux_label = "Fluid Flux in Production Well"
         lines2 = ax2.get_lines()
         ax1.legend(
@@ -278,9 +276,7 @@ def plot_fracture_displacement(
 
     # Plot displacement jump for each fracture
     for idx, fracture_name in enumerate(fracture_names):
-        fracture_subset = fracture_data[
-            fracture_data["fracture_id"] == fracture_name
-        ]
+        fracture_subset = fracture_data[fracture_data["fracture_id"] == fracture_name]
 
         # Filter to accepted times
         fracture_subset = fracture_subset[fracture_subset["time"].isin(accepted_times)]
@@ -323,10 +319,49 @@ def plot_fracture_displacement(
     return fig
 
 
+def summarize_slip_onset_times(
+    slip_onset_times: dict, fracture_names, velocities, output_file: str = None
+) -> None:
+    """Save a summary of slip onset times for different simulations."""
+    output_string = ""
+
+    for fracture in fracture_names:
+        # Create table with rows corresponding to boundary velocity and columns
+        # corresponding to long/short well. The entries are the slip onset times for
+        # this fracture.
+        output_string += f"Fracture: {fracture}\n"
+        for velocity in velocities:
+            output_string += f"Velocity: {velocity}\n"
+            for simulation, times in slip_onset_times.items():
+                if f"velocity_{velocity:.1f}_" in simulation and fracture in times:
+                    output_string += f"  {simulation}: {times[fracture]:.2f} seconds\n"
+                elif f"velocity_{velocity:.1f}_" in simulation:
+                    output_string += f"  {simulation}: Not found\n"
+
+    if output_file is not None:
+        with open(output_file, "w") as f:
+            f.write(output_string)
+    else:
+        print(output_string)
+
+
 class CosoExporter:
     evaluate_and_scale: Callable[
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
+
+    def sliding_onset_times(self) -> dict:
+        """Compute sliding onset time for each fracture."""
+        sliding_onset_times = {}
+        for time, data in zip(self._data_collection_times, self.results):
+            for name, variables in data.items():
+                if not name.startswith("Fracture"):
+                    continue
+                jump = variables["displacement_jump"]
+                if jump > DISPLACEMENT_JUMP_Y_MIN:
+                    if name not in sliding_onset_times:
+                        sliding_onset_times[name] = time
+        return sliding_onset_times
 
     def _face_scalar_to_cell_vector(
         self, sd: pp.Grid, face_scalar: np.ndarray
@@ -483,7 +518,9 @@ class CosoExporter:
                 top_cell = np.argsort(self.depth(sd.cell_centers))[0]
                 data[parent_well.tags["well_name"]].update(
                     {
-                        "temperature": temperature[cell_offsets[id] : cell_offsets[id + 1]][top_cell],
+                        "temperature": temperature[
+                            cell_offsets[id] : cell_offsets[id + 1]
+                        ][top_cell],
                         "enthalpy_flux": enthalpy_f[
                             face_offsets[id] : face_offsets[id + 1]
                         ][top_faces][0]
@@ -492,10 +529,18 @@ class CosoExporter:
                 )
         fracs = self.mdg.subdomains(dim=self.nd - 1)
         cell_offsets = np.cumsum([0] + [sd.num_cells for sd in fracs])
+
         displacement_jump = self.evaluate_and_scale(
             fracs, "displacement_jump", "m"
         ).reshape((self.nd, -1), order="F")
         jump_norm = np.linalg.norm(displacement_jump, axis=0)
+        friction_coefficient = self.evaluate_and_scale(
+            fracs, "friction_coefficient", ""
+        )
+        traction = self.evaluate_and_scale(fracs, "contact_traction", "-").reshape(
+            (self.nd, -1), order="F"
+        )
+        slip_tendency = self.compute_slip_tendency(traction, friction_coefficient)
         for id, sd in enumerate(fracs):
             key = self.fracture_names()[sd.frac_num]
             data[key] = {
@@ -506,6 +551,9 @@ class CosoExporter:
                 )
                 / np.sum(fracs[id].cell_volumes),
             }
+            data[key]["slip_tendency"] = np.mean(
+                slip_tendency[cell_offsets[id] : cell_offsets[id + 1]]
+            )
         return data
 
     def save_results(self) -> None:
@@ -550,7 +598,6 @@ class CosoExporter:
                 csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
                 file_base=self.params["file_name"],
                 title=self.create_plot_title(),
-
             )
             return
         well_names = self.injection_well_names + self.production_well_names
@@ -629,11 +676,14 @@ class CosoExporter:
                     f"{self.params['data_folder_name']}/well_monitoring/"
                     + f"{self.params['file_name']}_{plt_name}{suffix}.png"
                 )
-        start = (
-            1
-            if np.isclose(self.params["fracture_params"]["strike_angles"][0], 0)
-            else 0
-        )
+        if "example_4" in self.params["file_name"]:
+            start = 1
+        else:
+            start = (
+                1
+                if np.isclose(self.params["fracture_params"]["strike_angles"][0], 0)
+                else 0
+            )
         well_ind = 1 if "example_8" in self.params["file_name"] else 0
         plot_flow_rate_and_fracture_displacement(
             csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
@@ -705,7 +755,7 @@ if __name__ == "__main__":
         "Strike 45°, Tilted Fracture 1",
         "Strike 45°, Tilted Fracture 2",
     ]
-    transition_time  = pp.HOUR
+    transition_time = pp.HOUR
     # Alternate between warm and cold injection every period, with a short
     # transition time in between to allow for convergence without too large
     # jumps in the solution. The schedule defines the time points at which
@@ -732,7 +782,9 @@ if __name__ == "__main__":
         #     temperature_schedule=schedule,
         # )
         plot_flow_rate_and_fracture_displacement(
-            csv_dir=file_name, well_name="1 Injection well", file_base="example_8",
+            csv_dir=file_name,
+            well_name="1 Injection well",
+            file_base="example_8",
             fracture_names=["Fracture 1", "Fracture 2", "Fracture 3"],
             title=with_well_titles[0],
             temperature_schedule=schedule,
