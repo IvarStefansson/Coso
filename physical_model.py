@@ -93,7 +93,7 @@ class HeterogeneousPermeabilitySpecification:
         vals = self.solid.permeability * np.ones(size)
         high_perm_zones = self._high_perm_zones(cc)
         # Set permeability in the high permeability zones.
-        vals[high_perm_zones] *= 8
+        vals[high_perm_zones] *= 100
         permeability = pp.wrap_as_dense_ad_array(
             vals, size, name="heterogeneous_permeability"
         )

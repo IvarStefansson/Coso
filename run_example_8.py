@@ -6,10 +6,14 @@ import numpy as np
 from geometry import CoolingGeometry
 from material_parameters import granodiorite_values
 
-from physical_model import PhysicalModel, HeterogeneousPermeabilitySpecification
+from physical_model import (
+    PhysicalModel,
+    HeterogeneousPermeabilitySpecification,
+    FluidExtensions,
+)
 from boundary_conditions import (
     CosoBoundaryConditionsDisplacement,
-    NeumannWellBCsFromSchedule,
+    OnlyInjectionWellNeumannBCsFromSchedule,
 )
 
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
@@ -30,7 +34,7 @@ from porepy.viz.data_saving_model_mixin import (
 )
 from solution_strategy import SolutionStrategy
 from initial_conditions import CopyInitialCondition
-from exporting import CosoExporter, GeometryExporting
+from exporting import CosoExporter, GeometryExporting, summarize_slip_onset_times
 from wells import WellDataConceptual
 from porepy.numerics.nonlinear import line_search
 import diff_tpfa
@@ -54,12 +58,14 @@ if not logger.hasHandlers():
 
 class BaseModel(
     FractureDeformationExporting,
-    # IterationExporting,
+    IterationExporting,
+    ResidualExporting,
     GeometryExporting,
     CosoExporter,
     CoolingGeometry,
     # pp.poromechanics.TpsaPoromechanicsMixin,
     # diff_tpfa.DarcysLawAdEverywhere,
+    # FluidExtensions,
     HeterogeneousPermeabilitySpecification,
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
@@ -86,6 +92,9 @@ class BaseModel(
             Input folder_name: "case_II_with_wells_strike_35_tilted_fracture_0"
             Output: "with wells strike 35 tilted fracture, Tilted, Strike: 1"
         """
+        fn = self.params["plot_title"]
+        return fn
+
         fn = self.params["folder_name"]
 
         # The split returns ["example_7"] and [-1] gives "example_7" unchanged
@@ -117,7 +126,7 @@ class InitializationModel(
 
 
 class MainModel(
-    NeumannWellBCsFromSchedule,
+    OnlyInjectionWellNeumannBCsFromSchedule,
     CopyInitialCondition,
     WellBoundaryConditions,
     CosoBoundaryConditionsDisplacement,
@@ -139,7 +148,7 @@ if __name__ == "__main__":
 
     fracture_strike_angles = np.array(
         [
-           - 42,
+            -42,
             # -43,
             # -41,
             # 39,
@@ -147,41 +156,47 @@ if __name__ == "__main__":
             # 35,
         ]
     )
-    granodiorite_values["permeability"] = 2e-16
-    granodiorite_values["residual_aperture"] = 10.0e-4
-    granodiorite_values["dilation_angle"] = 0 # np.deg2rad(1)
+    strike = fracture_strike_angles[0]
+    granodiorite_values["permeability"] = 1e-16
+    granodiorite_values["residual_aperture"] = 5.0e-4  # just changed from 3e-4
+    granodiorite_values["dilation_angle"] = 0  # np.deg2rad(1)
     granodiorite_values["porosity"] = 0.02
 
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
-    init_granodiorite_values.update({
-        "permeability": 1e-15,
-        "friction_coefficient": 16,
-        })
+    init_granodiorite_values.update(
+        {
+            "permeability": 5e-16,
+            "friction_coefficient": 16,
+        }
+    )
     injection_temperature_values = [
         (30, 5),
-        (30, 30),
-        (5, 5),
+        # (30, 30),
+        # (5, 5),
+    ]
+    angle_index = 1
+    boundary_velocities = [0.0, 2.0e-6, 5.0e-6]
 
-    ]
-    angle_indices = [
-        # 0,  # Injection fracture
-        1,  # Central fracture
-        # 2,  # Production fracture
-    ]
-    for angle_index in angle_indices:
-        for strike in fracture_strike_angles:
-            # if strike == 45 and angle_index != 0:
-            #     # All fractures are the same at 45 degrees, so we only need to run one
-            #     # case.
-            #     continue
-            for high, low in injection_temperature_values:
+    controls = ["Pressure", "Rate"]
+    injection_fluxes = {}
+    all_slip_onset_times = {}
+
+    for velocity in boundary_velocities:
+        v_key = str(int(velocity))
+        injection_fluxes[v_key] = {}
+        for high, low in injection_temperature_values:
+            for control in controls:
                 tic = time.time()
-                suffix = f"_strike_{int(strike)}_tilted_fracture_{angle_index}_temperatures_high_{int(high)}_low_{int(low)}"
+                t_key = f"t_high_{high}_low_{low}"
+
+                suffix = f"{control}_controlled_{t_key}_velocity_{velocity:.1e}"
 
                 logger.info(f"Starting the simulation with suffix {suffix}")
                 dt = 5e2
                 period = 100 * pp.DAY
                 transition_time = 10 * pp.HOUR
+                # period = 1e4
+                # transition_time = 5e3
                 # Alternate between warm and cold injection every period, with a short
                 # transition time in between to allow for convergence without too large
                 # jumps in the solution. The schedule defines the time points at which
@@ -192,28 +207,31 @@ if __name__ == "__main__":
                         1 * period - transition_time,  # End of first warm injection
                         1 * period,  # Start of first cold period
                         2 * period - transition_time,  # End of first cold period
-                        2 * period,  # Start of second warm injection
-                        3 * period - transition_time,  # End of second warm injection
+                        2 * period,  # Start of 2nd warm injection
+                        3 * period - transition_time,  # End of 2nd warm injection
                         3 * period,  # Start of second cold period
                         4 * period - transition_time,  # End of second cold period
                         4 * period,
                         5 * period - transition_time,  # End of third warm injection
                         5 * period,
                         6 * period - transition_time,  # End of third cold period
+                        6 * period,  # Start of fourth warm injection
+                        7 * period - transition_time,
+                        7 * period,  # Start of fourth cold period
+                        8 * period - transition_time,  # End of fourth cold period
                     ],
                 )
-                # if has_wells:
-                #     offset = 2 if schedule[1] < 2 * pp.DAY else 1
-                #     neumann_intervals = [
-                #         # (schedule[2 * i], schedule[2 * i + 1])
-                #         (schedule[2 * i + offset], schedule[2 * i + offset + 1])
-                #         for i in range(schedule.size // 2 - 1)
-                #     ]
-                # else:
-                #     # Only need first and last time step if no wells are present
-                #     schedule = np.array([schedule[0], schedule[-1]])
-                #     dt = 100 * pp.DAY
-                neumann_intervals = []
+                if control == "Rate":
+                    # We will use Neumann in the cold periods of the schedule.
+                    neumann_intervals = [
+                        (1 * period, 2 * period),
+                        (3 * period, 4 * period),
+                        (5 * period, 6 * period),
+                        (7 * period, 8 * period),
+                    ]
+
+                else:
+                    neumann_intervals = []
                 # schedule += injection_start_time
                 # Add the initial time step to the schedule
                 # schedule = np.insert(schedule, 0, 0)  # Initial time step at 0
@@ -238,13 +256,19 @@ if __name__ == "__main__":
                 # fracture_size = 1e3
                 cell_size = 10e2
 
-                folder_name = "case_III" + suffix
+                folder_name = "case_III/" + suffix
                 folder_name_init = folder_name + "_initialization"
                 file_name = "example_8"
                 data_folder_name = f"{folder_name}_saved_data"
                 strike_angles = np.deg2rad([45, 45, 45])
                 strike_angles[angle_index] = np.deg2rad(strike)
+                title = (
+                    f"{control} controlled, Velocity={velocity:.1e} m/y, "
+                    + f"$T_{{h}}$={high}°C, $T_{{l}}$={low}°C"
+                )
+
                 model_params_init = {
+                    "plot_title": title,
                     "domain_sizes": np.array([6, 6, 6]) * 1e3,
                     "material_constants": {
                         "solid": pp.SolidConstants(**init_granodiorite_values),
@@ -263,7 +287,7 @@ if __name__ == "__main__":
                     "initialization": True,
                     "use_wells": False,
                     "reference_variable_values": pp.ReferenceVariableValues(
-                        temperature=300.0,
+                        temperature=pp.Celsius_to_Kelvin(20),
                         #     pressure=pp.BAR,
                     ),
                     "thermal_gradient": 70e-3,  # Test 7e-2
@@ -272,7 +296,7 @@ if __name__ == "__main__":
                     "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
                     "fracture_params": {
                         "fracture_major_axes": np.array(
-                            (fracture_size, 1.3 *fracture_size, fracture_size)
+                            (fracture_size, 1.3 * fracture_size, fracture_size)
                         ),
                         "strike_angles": strike_angles,
                         "num_points": 8,
@@ -281,10 +305,12 @@ if __name__ == "__main__":
                     "darcy_flux_discretization": "tpfa" if tp else "mpfa",
                     "fourier_flux_discretization": "tpfa" if tp else "mpfa",
                     "heterogeneous_permeability": False,
+                    "use_ic_interpolation": True,
+                    "boundary_displacement_velocity_scaling": velocity / pp.YEAR,
                 }
                 model_params = copy.deepcopy(model_params_init)
                 # Reduce target pressure in favour of displacement BC as driving force?
-                injection_pressures = np.full(schedule.shape, .2 * pp.MEGA * pp.PASCAL)
+                injection_pressures = np.full(schedule.shape, 0.2 * pp.MEGA * pp.PASCAL)
                 # injection_pressures = np.full(schedule.shape, 10* pp.ATMOSPHERIC_PRESSURE)
                 # injection_pressures[0] = .5 * pp.MEGA * pp.PASCAL  # Initial pressure
                 # injection_pressures[:1] = 1 * pp.ATMOSPHERIC_PRESSURE
@@ -297,17 +323,35 @@ if __name__ == "__main__":
                 # transition time in between. This corresponds to injection temperatures
                 # of alternating two consequtive values in the schedule, with the first
                 # value being the higher one.
+                if control == "Rate":
+                    injection_temperatures = np.full(
+                        schedule.shape, pp.Celsius_to_Kelvin(high)
+                    )
+                else:
+                    injection_temperatures = pp.Celsius_to_Kelvin(
+                        np.tile([high, high, low, low], schedule.size // 4)
+                    )
 
-                injection_temperatures = pp.Celsius_to_Kelvin(np.tile([high, high, low, low], schedule.size // 4))
-
-                production_temperatures = np.full(schedule.shape, pp.Celsius_to_Kelvin(150))
+                production_temperatures = np.full(
+                    schedule.shape, pp.Celsius_to_Kelvin(150)
+                )
                 # Can be refined to have different schedules for each well.
                 for name in MainModel.injection_well_names.fget(None):
                     model_params[f"{name}_pressures"] = injection_pressures
                     model_params[f"{name}_temperatures"] = injection_temperatures
+
+                    val = (
+                        1e10
+                        if control == "Pressure"
+                        else injection_fluxes[v_key][t_key]
+                    )
+                    model_params[f"{name}_darcy_fluxes"] = val
                 for name in MainModel.production_well_names.fget(None):
                     model_params[f"{name}_pressures"] = production_pressures
                     model_params[f"{name}_temperatures"] = production_temperatures
+                    # Should not be used, but needs to be set. Set to high value to
+                    # reveal if it is used by mistake.
+                    model_params[f"{name}_darcy_fluxes"] = 1e10
 
                 # Create the model
                 solver_params = {
@@ -317,7 +361,7 @@ if __name__ == "__main__":
                     "max_iterations": 20,
                     "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
                     "local_line_search": 1,
-                    "global_line_search": 0,
+                    "global_line_search": 1,
                     "residual_line_search_interval_size": 1e-3,
                     "constraint_violation_tolerance": 1e-3,
                 }
@@ -334,9 +378,9 @@ if __name__ == "__main__":
                     np.max(
                         np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])
                     )
-                    + 0.002
+                    + 0.005
                 )
-                solver_params["max_iterations"] = 15
+                # solver_params["max_iterations"] = 15
                 granodiorite_values["friction_coefficient"] = friction_coeff
                 # Save granodiorite values for main model
                 df = pandas.DataFrame.from_dict(granodiorite_values, orient="index")
@@ -367,11 +411,35 @@ if __name__ == "__main__":
                         "local_line_search": 1,
                         "global_line_search": 1,
                         "nl_convergence_tol_res": 1e0,
+                        "residual_line_search_interval_size": 2e-3,
                     }
                 )
                 pp.run_time_dependent_model(model, solver_params)
-                model.plot_well_monitoring(temperature_schedule=schedule)
+                df = model.plot_well_monitoring(temperature_schedule=schedule)
                 toc = time.time()
                 logger.info(
                     f"Simulation with suffix {suffix} completed in {toc - tic:.2f} seconds."
                 )
+                # Retrieve injection flux at end of simulation if pressure controlled,
+                # for use in next simulation with rate control.
+                if control == "Pressure":
+                    df = model.well_monitoring_data
+                    well_data = df[df["well_name"] == model.injection_well_names[0]]
+                    injection_fluxes[v_key][t_key] = well_data["darcy_flux"].iloc[-1][0]
+                    logger.info(
+                        f"Final injection flux for pressure controlled simulation: {injection_fluxes[v_key][t_key]:.2e} m/s"
+                    )
+                # Retrieve slip onset times.
+                slip_onset_times = model.slip_onset_times()
+                all_slip_onset_times[suffix] = slip_onset_times
+
+    # Save injection fluxes for all simulations in a CSV file.
+    injection_fluxes_df = pandas.DataFrame(injection_fluxes)
+    injection_fluxes_output_path = Path(data_folder_name) / "injection_fluxes.csv"
+    injection_fluxes_df.to_csv(injection_fluxes_output_path, index=False)
+    summarize_slip_onset_times(
+        all_slip_onset_times,
+        model.fracture_names(),
+        boundary_velocities,
+        output_file=str(Path(data_folder_name) / "slip_onset_times.csv"),
+    )

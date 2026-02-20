@@ -156,8 +156,10 @@ class CosoBoundaryConditionsDisplacement:
         # The relative displacement rate is approx. 24 + 14 mm/year.
         # The side length of the Coso Geothermal Field is roughly 10 km.
         # rate = (38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR)
-        c = self.params.get("boundary_displacement_velocity_scaling", 1.0)
-        rate = 38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR * c
+        rate = self.params.get(
+            "boundary_displacement_velocity",
+            38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR,
+        )
         return self.units.convert_units(rate, "s^-1") * np.array([1.0, 0.0, 0.0])
 
 
@@ -332,7 +334,7 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
         Returns:
             The boundary condition type for Darcy flux on the given subdomain.
         """
-        if self.is_well_grid(sd) and self.neumann_bcs_active():
+        if self.is_well_grid(sd) and self.neumann_bcs_active(sd):
             # Before start of injection, impose Neumann BCs on well grids. A zero-flux
             # condition is imposed by default when no BC values are specified. The <=
             # comparison ensures that the BCs are kept as Neumann as long as the time
@@ -354,7 +356,7 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
         Returns:
             The boundary condition type for Fourier flux on the given subdomain.
         """
-        if self.is_well_grid(sd) and self.neumann_bcs_active():
+        if self.is_well_grid(sd) and self.neumann_bcs_active(sd):
             # Before start of injection, impose Neumann BCs on well grids. A zero-flux
             # condition is imposed by default when no BC values are specified. The <=
             # comparison ensures that the BCs are kept as Neumann as long as the time
@@ -367,8 +369,11 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
         else:
             return super().bc_type_fourier_flux(sd)  # type: ignore[misc]
 
-    def neumann_bcs_active(self) -> bool:
+    def neumann_bcs_active(self, sd: pp.Grid) -> bool:
         """Check if Neumann BCs on well grids are active.
+
+        Parameters:
+            sd: The subdomain for which to check if Neumann BCs are active.
 
         Returns:
             True if the current time is within the first time interval, False otherwise.
@@ -382,3 +387,91 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
                     is_neumann = True
                     break
         return is_neumann
+
+    def bc_values_darcy_flux(self, bg: pp.BoundaryGrid) -> np.ndarray:
+        """Return boundary values for pressure on all boundaries.
+
+        Parameters:
+            bg: The boundary grid for which to return the BC values.
+
+        Returns:
+            The boundary values for pressure on the given boundary grid.
+        """
+        sd = bg.parent
+        # Ignore super call for type checking, as it is assumed to be present for this
+        # mixin class.
+        values = super().bc_values_pressure(bg)  # type: ignore[misc]
+        if self.is_well_grid(sd):
+            well = self.well_network.wells[sd.tags["parent_well_index"]]
+            well_tag = well.tags["well_name"]
+            protocol = self.well_protocols()[well_tag]
+            # Find indices of the well boundary sides.
+            domain_sides = self.domain_boundary_sides(bg)
+            # The top of the domain is '.top' in 3d, '.north' in 2d.
+            inds = domain_sides.top if self.nd == 3 else domain_sides.north
+            # Set pressure values according to the well protocol.
+            values[inds] = self.units.convert_units(
+                self.get_well_value(
+                    protocol["darcy_fluxes"],
+                    self.time_manager.schedule,
+                    self.time_manager.time,
+                ),
+                "Pa",
+            )
+        return values
+
+    @property
+    def well_protocol_variables(self) -> list[str]:
+        """List of variable names for which well protocols are defined."""
+        return ["temperatures", "pressures", "darcy_fluxes"]
+
+
+class OnlyInjectionWellNeumannBCsFromSchedule(NeumannWellBCsFromSchedule):
+    """Class defining Neumann BCs only on injection well grids during the first time interval."""
+
+    def neumann_bcs_active(self, sd: pp.Grid) -> bool:
+        well = self.parent_well(sd)
+        if well is None:
+            return False
+        is_injection = well.tags["well_name"] in self.injection_well_names
+        return super().neumann_bcs_active(sd) and is_injection
+
+    def well_protocols(self) -> dict[str, dict[str, NDArray[np.float64]]]:
+        """Dictionary mapping well tags to well protocols.
+
+        Returns:
+            Dictionary with well protocols, each containing a dictionary with
+            time-dependent temperatures and pressures, with each value being an array of
+            size equal to the number of scheduled times in the time manager.
+        """
+        num_times = self.time_manager.schedule.size
+        protocols: dict[str, dict[str, NDArray[np.float64]]] = {}
+        # Construct protocols for each well.
+        for well_tag in self.well_names:
+            # Initialize protocol dictionary for the well.
+            protocols[well_tag] = {}
+            # Set values for temperatures and pressures.
+            for variable in self.well_protocol_variables:
+                input_values = self.params.get(f"{well_tag}_{variable}", 0.0)
+                if isinstance(input_values, (float, int)):
+                    # Broadcast single value to all time steps for convenient user
+                    # definition of well protocols.
+                    values = np.full(num_times, input_values, dtype=float)
+
+                elif isinstance(input_values, (list, np.ndarray)):
+                    # Enforce array of float values.
+                    values = np.array(input_values, dtype=float)
+                    if values.size != num_times:
+                        raise ValueError(
+                            f"Well protocol for {well_tag} {variable} has size "
+                            f"{values.size}, expected {num_times}."
+                        )
+                else:
+                    raise TypeError(
+                        f"Well protocol for {well_tag} {variable} has unsupported "
+                        f"type {type(input_values)}."
+                    )
+                # Populate well dictionary for the current variable.
+                protocols[well_tag][variable] = values
+
+        return protocols
