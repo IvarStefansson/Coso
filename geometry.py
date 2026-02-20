@@ -277,7 +277,7 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
         x_inj = np.full((1, 2), x + dx)
         y_inj = np.array([[y_mid + 2, y_mid - 1]])
-        z_inj = np.array([[0, 2 / 3 * z]])
+        z_inj = np.array([[0, 3 / 4 * z]])
         pts_inj = np.vstack([x_inj, y_inj, z_inj])
         # Create a well object.
         well_inj = pp.Well(

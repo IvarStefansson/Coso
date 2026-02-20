@@ -1,9 +1,11 @@
+import re
+
 import porepy as pp
 import numpy as np
 from geometry import ConceptualGeometry
 from material_parameters import granodiorite_values
 
-from physical_model import PhysicalModel
+from physical_model import PhysicalModel, HeterogeneousPermeabilitySpecification
 from boundary_conditions import (
     CosoBoundaryConditionsDisplacement,
     NeumannWellBCsFromSchedule,
@@ -19,10 +21,7 @@ from porepy.applications.initial_conditions.model_initial_conditions import (
     InitialConditionHydrostaticPressureValues,
     InitialConditionThermalGradientTemperatureValues,
 )
-from porepy.examples.geothermal_reservoir import (
-    WellBoundaryConditions,
-    NeumannWellBCsFirstTimeInterval,
-)
+from porepy.examples.geothermal_reservoir import WellBoundaryConditions
 from porepy.viz.data_saving_model_mixin import (
     IterationExporting,
     FractureDeformationExporting,
@@ -30,14 +29,13 @@ from porepy.viz.data_saving_model_mixin import (
 )
 from solution_strategy import SolutionStrategy
 from initial_conditions import CopyInitialCondition
-from exporting import CosoExporter, GeometryExporting
+from exporting import CosoExporter, GeometryExporting, summarize_slip_onset_times
 from wells import WellDataConceptual
 from porepy.numerics.nonlinear import line_search
 import diff_tpfa
 import logging
 import sys
 import copy
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -61,6 +59,7 @@ class BaseModel(
     ConceptualGeometry,
     # pp.poromechanics.TpsaPoromechanicsMixin,
     # diff_tpfa.DarcysLawAdEverywhere,
+    HeterogeneousPermeabilitySpecification,
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
     pp.models.solution_strategy.ContactIndicators,
@@ -71,6 +70,23 @@ class BaseModel(
     PhysicalModel,
 ):
     """Model for the Coso geothermal reservoir."""
+
+    def create_plot_title(self) -> str:
+        """Generate a formatted plot title from folder name and simulation parameters.
+
+        Extracts simulation metadata from folder name (strike angle, fracture index, well status)
+        and formats it as a human-readable title. Fracture indices are incremented by 1 for
+        display purposes (0-indexed internally, 1-indexed for display).
+
+        Returns:
+            str | None: Formatted plot title with well status, strike angle, and fracture info.
+
+        Example:
+            Input folder_name: "case_II_with_wells_strike_35_tilted_fracture_0"
+            Output: "with wells strike 35 tilted fracture, Tilted, Strike: 1"
+        """
+        fn = self.params["plot_title"]
+        return fn
 
 
 # inds = slice(0, 1) if isinstance(PhysicalModel, pp.Thermoporomechanics) else slice(0)
@@ -107,170 +123,184 @@ class ConstraintLineSearchNonlinearSolver(
 
 
 if __name__ == "__main__":
-    fast = 1 == 11  # Set to 1 for fast run, 0 for full run
-    # Define the time parameters
-    logger.info("Starting the simulation")
-    dt = 1e2
-    # injection_start_time = 10e3
-    # Include dt to make sure itis included in the time steps which are exported.
-    schedule = np.array([0, 1, 10, 20, 50, 80, 111, 112, 113, 114, 115, 116]) * pp.DAY
-    schedule = np.array(
-        [0, 2 * dt, pp.DAY, 100 * pp.DAY, 102 * pp.DAY, 200 * pp.DAY, 202 * pp.DAY]
-    )
-    schedule = np.array(
-        [
-            0,
-            2 * dt,  # Initial time steps with closed wells
-            # pp.DAY,  # Ramp up to operation
-            pp.YEAR,  # First shut-in
-            pp.YEAR + 2 * pp.DAY,  # Restart operation
-            2 * pp.YEAR,  # Second shut-in
-            2 * pp.YEAR + 2 * pp.DAY,  # End second shut-in and end of simulation
-        ]
-    )
-    neumann_intervals = [
-        # (-1.0, schedule[1]),  # Close wells initially Skip this?
-        (schedule[2], schedule[3]),  # Shut-in period 1
-        (schedule[-2], schedule[-1]),  # Shut-in period 2
-    ]
-    # schedule += injection_start_time
-    # Add the initial time step to the schedule
-    # schedule = np.insert(schedule, 0, 0)  # Initial time step at 0
-    time_manager = pp.TimeManager(
-        schedule=schedule,
-        dt_init=dt,
-        dt_min_max=(1e-2, max(dt, pp.YEAR / 5)),
-        iter_max=20,
-        iter_optimal_range=(5, 12),
-        iter_relax_factors=(0.6, 2.0),
-        recomp_factor=0.3,
-        recomp_max=10,
-    )
-    dt_init = 2e9  # * pp.YEAR
-    time_manager_init = pp.TimeManager(
-        [0, 2 * dt_init],
-        dt_init=dt_init,
-        dt_min_max=(1, 2 * dt_init),
-        constant_dt=True,
-    )
-    fracture_size = 6e2
-    cell_size = 8e2
-    if fast:
-        cell_size = 2e3
-    init_granodiorite_values = copy.deepcopy(granodiorite_values)
-    suffix = "_long_well"
-    # suffix = ""
-    folder_name = "conceptual" + suffix
-    folder_name_init = folder_name + "_initialization"
-    file_name = "example_4" + suffix
-    model_params_init = {
-        "domain_size": 2.0e3,
-        "material_constants": {
-            "solid": pp.SolidConstants(**init_granodiorite_values),
-            "fluid": pp.FluidComponent(**pp.fluid_values.water),
-        },
-        "units": pp.Units(m=1.0, kg=1.0e0, K=1.0),
-        "time_manager": time_manager_init,
-        "grid_type": "simplex",
-        "meshing_arguments": {
-            "cell_size": cell_size,
-            "cell_size_fracture": 0.7 * fracture_size,
-        },
-        "file_name": file_name,
-        "data_folder_name": f"{folder_name}_saved_data",
-        "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
-        "use_wells": False,
-        "reference_variable_values": pp.ReferenceVariableValues(
-            temperature=350.0,
-            #     pressure=pp.BAR,
-        ),
-        "thermal_gradient": 5e-2,  # 73,  # K/m  tåltes ikke
-        "fracture_file": "coords.txt",
-        "folder_name": folder_name_init,
-        "initialization": True,
-        "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
-        "fracture_params": {  # Other options are available in the geometry mixin.
-            "fracture_major_axes": np.array(
-                (fracture_size, fracture_size, 1.0 * fracture_size)
-            ),
-        },
-    }
-    model_params = copy.deepcopy(model_params_init)
-    # Reduce target pressure in favour of displacement BC as driving force?
-    injection_pressures = np.full(schedule.shape, 10 * pp.MEGA * pp.PASCAL)
+    tp = True
 
-    production_pressures = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
-    injection_temperatures = np.full(schedule.shape, 323.15)
-    production_temperatures = np.full(schedule.shape, 373.15)
-    # Can be refined to have different schedules for each well.
-    for name in MainModel.injection_well_names.fget(None):
-        model_params[f"{name}_pressures"] = injection_pressures
-        model_params[f"{name}_temperatures"] = injection_temperatures
-    for name in MainModel.production_well_names.fget(None):
-        model_params[f"{name}_pressures"] = production_pressures
-        model_params[f"{name}_temperatures"] = production_temperatures
+    cases = (("long_well", 1e3), ("short_well", 2e3))
+    boundary_velocities = [0.0, 2.0e-6, 5.0e-6]
 
-    # Create the model
-    solver_params = {
-        "nl_convergence_tol_res": 1e-1,
-        "nl_convergence_tol": 1e-4,
-        "nl_divergence_tol": 1e20,
-        "max_iterations": 20,
-        "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
-        "local_line_search": 1,
-        "global_line_search": 0,
-        "residual_line_search_interval_size": 1e-3,
-        "constraint_violation_tolerance": 1e-3,
-        # "linear_solver": "scipy_sparse",
-    }
-    # Restart does not seem to work properly if used for a new instance. Main suspect is
-    # configuration of file names/appendices.
-    run_initialization = 1 == 1
-    if not run_initialization:
-        model_params_init["restart_options"] = {
-            "restart": True,
-            "pvd_file": Path(folder_name_init) / f"{file_name}.pvd",
-            "times_file": Path(folder_name_init) / "times.json",
-            "is_mdg_pvd": True,
-        }
-    init_model = InitializationModel(model_params_init)
+    # boundary_velocities = [5.0, 15.0]
+    slip_onset_times = {}
+    for velocity in boundary_velocities:
+        for well_name, well_endpoint in cases:
+            # Define the time parameters
+            logger.info("Starting the simulation")
+            dt = 1e2
 
-    pp.run_time_dependent_model(init_model, solver_params)
-    # Analyze the initialization results to set friction coefficient
-    sds = init_model.mdg.subdomains(dim=2)
-    traction = init_model.evaluate_and_scale(sds, "contact_traction", "-").reshape(
-        (3, -1), order="F"
+            shut_in_duration = pp.DAY
+            production_period = 1 * pp.YEAR
+            schedule = np.array(
+                [
+                    0,
+                    2 * dt,  # Initial time steps with closed wells
+                    # pp.DAY,  # Ramp up to operation
+                    production_period - shut_in_duration,  # First shut-in
+                    production_period,  # Restart operation
+                    2 * production_period - shut_in_duration,  # Second shut-in
+                    2 * production_period,  # End second shut-in and end of simulation
+                    3 * production_period - shut_in_duration,  # Second shut-in
+                    3 * production_period,  # End second shut-in and end of simulation
+                ]
+            )
+            offset = 2 if schedule[1] < 2 * pp.DAY else 1
+            neumann_intervals = [
+                (schedule[2 * i + offset], schedule[2 * i + offset + 1])
+                for i in range(schedule.size // 2 - 1)
+            ]
+            # schedule += injection_start_time
+            # Add the initial time step to the schedule
+            # schedule = np.insert(schedule, 0, 0)  # Initial time step at 0
+            time_manager = pp.TimeManager(
+                schedule=schedule,
+                dt_init=dt,
+                dt_min_max=(1e-2, max(dt, production_period / 5)),
+                iter_max=20,
+                iter_optimal_range=(5, 12),
+                iter_relax_factors=(0.6, 2.0),
+                recomp_factor=0.3,
+                recomp_max=10,
+            )
+            dt_init = 5e9  # * pp.YEAR
+            time_manager_init = pp.TimeManager(
+                [0, 2 * dt_init],
+                dt_init=dt_init,
+                dt_min_max=(1, 2 * dt_init),
+                constant_dt=False,
+            )
+            domain_size = 4.0e3
+            fracture_size = 5e2
+            cell_size = 10e2
+            init_granodiorite_values = copy.deepcopy(granodiorite_values)
+            simulation_name = f"velocity_{velocity:.1e}_" + well_name
+            folder_name = "Case_I/" + simulation_name
+            folder_name_init = folder_name + "_initialization"
+            file_name = "example_4"
+            title = well_name.replace("_", " ") + f", Velocity = {velocity:.1e} m/y"
+            title = title[0].upper() + title[1:]
+            model_params_init = {
+                "plot_title": title,
+                "domain_sizes": np.full(3, domain_size),
+                "material_constants": {
+                    "solid": pp.SolidConstants(**init_granodiorite_values),
+                    "fluid": pp.FluidComponent(**pp.fluid_values.water),
+                },
+                "units": pp.Units(m=1.0, kg=1.0e0, K=1.0),
+                "time_manager": time_manager_init,
+                "grid_type": "simplex",
+                "meshing_arguments": {
+                    "cell_size": cell_size,
+                    "cell_size_fracture": 0.7 * fracture_size,
+                },
+                "file_name": file_name,
+                "data_folder_name": f"{folder_name}_saved_data",
+                "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
+                "use_wells": False,
+                "reference_variable_values": pp.ReferenceVariableValues(
+                    temperature=350.0,
+                    #     pressure=pp.BAR,
+                ),
+                "thermal_gradient": 7e-2,
+                "fracture_file": "coords.txt",
+                "folder_name": folder_name_init,
+                "initialization": True,
+                "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
+                "fracture_params": {  # Other options are available in the geometry mixin.
+                    "fracture_major_axes": np.array(
+                        (
+                            fracture_size / domain_size,
+                            fracture_size / domain_size,
+                            fracture_size / domain_size,
+                        )
+                    ),
+                },
+                "boundary_displacement_velocity_scaling": velocity / pp.YEAR,
+                "heterogeneous_permeability": True,
+                "darcy_flux_discretization": "tpfa" if tp else "mpfa",
+                "fourier_flux_discretization": "tpfa" if tp else "mpfa",
+            }
+            model_params = copy.deepcopy(model_params_init)
+            # Reduce target pressure in favour of displacement BC as driving force?
+            injection_pressures = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
+
+            production_pressures = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
+            injection_temperatures = np.full(schedule.shape, pp.Celsius_to_Kelvin(10))
+            production_temperatures = np.full(schedule.shape, 373.15)
+            # Can be refined to have different schedules for each well.
+            for name in MainModel.injection_well_names.fget(None):
+                model_params[f"{name}_pressures"] = injection_pressures
+                model_params[f"{name}_temperatures"] = injection_temperatures
+            for name in MainModel.production_well_names.fget(None):
+                model_params[f"{name}_pressures"] = production_pressures
+                model_params[f"{name}_temperatures"] = production_temperatures
+
+            # Create the model
+            solver_params = {
+                "nl_convergence_tol_res": 1e-1,
+                "nl_convergence_tol": 1e-4,
+                "nl_divergence_tol": 1e20,
+                "max_iterations": 20,
+                "nonlinear_solver": ConstraintLineSearchNonlinearSolver,
+                "local_line_search": 1,
+                "global_line_search": 0,
+                "residual_line_search_interval_size": 1e-3,
+                "constraint_violation_tolerance": 1e-3,
+                # "linear_solver": "scipy_sparse",
+            }
+
+            init_model = InitializationModel(model_params_init)
+
+            pp.run_time_dependent_model(init_model, solver_params)
+            # Analyze the initialization results to set friction coefficient
+            sds = init_model.mdg.subdomains(dim=2)
+            traction = init_model.evaluate_and_scale(
+                sds, "contact_traction", "-"
+            ).reshape((3, -1), order="F")
+            friction_coeff = (
+                np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :]))
+                + 0.001
+            )
+            granodiorite_values["friction_coefficient"] = friction_coeff
+            model_params.update(
+                {
+                    "time_manager": time_manager,
+                    "file_name": file_name,
+                    "folder_name": folder_name,
+                    "initialization": False,
+                    "use_wells": True,
+                    "reference_from_initial": True,
+                    "material_constants": {
+                        "solid": pp.SolidConstants(**granodiorite_values),
+                        "fluid": pp.FluidComponent(**pp.fluid_values.water),
+                    },
+                    "neumann_intervals": neumann_intervals,
+                    "production_well_y_endpoint": well_endpoint,
+                }
+            )
+            model = MainModel(model_params)
+            model.initialization_model = init_model
+            solver_params.update(
+                {
+                    "local_line_search": 1,
+                    "global_line_search": 1,
+                    "nl_convergence_tol_res": 1e0,
+                }
+            )
+            pp.run_time_dependent_model(model, solver_params)
+            model.plot_well_monitoring()
+            slip_onset_times[simulation_name] = model.sliding_onset_times()
+    # Summarize the slip onset times in a CSV file.
+    summarize_slip_onset_times(
+        slip_onset_times,
+        model.fracture_names(),
+        boundary_velocities,
+        output_file=folder_name + "/saved_data/slip_onset_times.csv",
     )
-    friction_coeff = (
-        np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + 0.001
-    )
-    granodiorite_values["friction_coefficient"] = friction_coeff
-    model_params.update(
-        {
-            "time_manager": time_manager,
-            "file_name": file_name,
-            "folder_name": folder_name,
-            "use_wells": True,
-            "reference_from_initial": True,
-            "material_constants": {
-                "solid": pp.SolidConstants(**granodiorite_values),
-                "fluid": pp.FluidComponent(**pp.fluid_values.water),
-                # "numerical": pp.NumericalConstants(characteristic_displacement=1e0),  # type: ignore[arg-type]
-            },
-            "neumann_intervals": neumann_intervals,
-            "production_well_z_endpoint": 0.0,  # -1.5,
-        }
-    )
-    if "long" in folder_name:
-        model_params["production_well_z_endpoint"] = -1.5
-    model = MainModel(model_params)  # Load from initialization from file
-    model.initialization_model = init_model
-    solver_params.update(
-        {
-            "local_line_search": 1,
-            "global_line_search": 1,
-            "nl_convergence_tol_res": 1e0,
-        }
-    )
-    pp.run_time_dependent_model(model, solver_params)
-    model.plot_well_monitoring()

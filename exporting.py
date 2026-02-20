@@ -339,6 +339,10 @@ def summarize_slip_onset_times(
                     output_string += f"  {simulation}: Not found\n"
 
     if output_file is not None:
+        # Create directory if it doesn't exist
+        output_dir = os.path.dirname(output_file)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         with open(output_file, "w") as f:
             f.write(output_string)
     else:
@@ -350,7 +354,7 @@ class CosoExporter:
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
 
-    def sliding_onset_times(self) -> dict:
+    def slip_onset_times(self) -> dict:
         """Compute sliding onset time for each fracture."""
         sliding_onset_times = {}
         for time, data in zip(self._data_collection_times, self.results):
@@ -687,7 +691,7 @@ class CosoExporter:
         well_ind = 1 if "example_8" in self.params["file_name"] else 0
         plot_flow_rate_and_fracture_displacement(
             csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
-            well_name=self.production_well_names[well_ind],
+            well_name=self.well_names[well_ind],
             file_base=self.params["file_name"],
             fracture_names=self.fracture_names()[start:],
             title=self.create_plot_title(),

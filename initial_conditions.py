@@ -171,7 +171,7 @@ class CopyInitialCondition:
 
     @property
     def use_ic_interpolation(self) -> bool:
-        return self.params.get("use_ic_interpolation", True)
+        return self.params.get("use_ic_interpolation", False)
 
     def ic_values_pressure(self, sd: pp.Grid) -> np.ndarray:
         if self.well_related_domain(sd):

@@ -58,8 +58,7 @@ if not logger.hasHandlers():
 
 class BaseModel(
     FractureDeformationExporting,
-    IterationExporting,
-    ResidualExporting,
+    # IterationExporting,
     GeometryExporting,
     CosoExporter,
     CoolingGeometry,

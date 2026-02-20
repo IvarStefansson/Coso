@@ -41,7 +41,7 @@ granodiorite_values = {
     "dilation_angle": 0.1,  # TODO: Find a reference and a value
     "permeability": 2e-16,  # [2], p. 1
     "fracture_gap": 0e-4,  # TODO: Find a reference and a value
-    "residual_aperture": 1e-3,  # TODO: Find a reference and a value
+    "residual_aperture": 10e-4,  # TODO: Find a reference and a value
     "well_radius": 1.5e-1,  # TODO: Find a reference and a value. Not too far off if
     # LineID can be trusted. Increase to 0.2 m, to avoid pressure drop between wells?
     "normal_permeability": 1e-8,  # TODO: Reconsider model.
