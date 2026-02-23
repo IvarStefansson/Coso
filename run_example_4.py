@@ -378,14 +378,23 @@ if __name__ == "__main__":
                         "preconditioner_factory": pp_solvers.thm_factory
                     }
                     linear_solver_params = {
-                        "mechanics": {
+                        # Options for mechanics.
+                        "mechanics_amg": {
                             "pc_hypre_boomeramg_strong_threshold": 0.9,
                             "pc_hypre_boomeramg_smooth_type": "ilu",
                             "pc_hypre_boomeramg_ilu_level": 1,
+                            # "ksp_type": "gmres",
+                            # "ksp_rtol": 1e-6,
                             "pc_hypre_boomeramg_ilu_drop_tol": 1e-5,
                         },
-                        "identity": {"pc_type": "ilu"},
-                        "ksp_monitor": None,
+                        # Options for the temperature block in the first stage of CPR.
+                        "cpr0_energy": {"pc_type": "ilu"},
+                        "gmres": {
+                            # Options for the outer solver
+                            "ksp_monitor": None,
+                            # "ksp_type": "fgmres",
+                            "ksp_max_it": 400,
+                        },
                     }
                     model_params_init["linear_solver"]["options"] = linear_solver_params
 
