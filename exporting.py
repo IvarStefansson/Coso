@@ -1,12 +1,12 @@
 import logging
 from typing import Callable, Sequence
+from pathlib import Path
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.legend_handler import HandlerTuple
 import numpy as np
 import pandas as pd
 import porepy as pp
-import os
 
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ DISPLACEMENT_JUMP_Y_MIN = 1e-10
 
 
 def plot_flow_rate_and_fracture_displacement(
-    csv_dir: str,
+    csv_dir: Path | str,
     well_name: str,
     file_base: str,
     fracture_names,
@@ -35,9 +35,10 @@ def plot_flow_rate_and_fracture_displacement(
         csv_dir: Path to directory containing the CSV files.
         well_name: Name of the production well to plot (default: "16A-20").
     """
+    csv_dir = Path(csv_dir)
     # Read CSV files
-    well_data = pd.read_csv(os.path.join(csv_dir, f"{file_base}.csv"))
-    fracture_data = pd.read_csv(os.path.join(csv_dir, f"{file_base}_fractures.csv"))
+    well_data = pd.read_csv(csv_dir / f"{file_base}.csv")
+    fracture_data = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
 
     # Process well data
     well_data_filtered = well_data[well_data["well_name"] == well_name].copy()
@@ -201,7 +202,7 @@ def plot_flow_rate_and_fracture_displacement(
     )
     fig.tight_layout()
     # Save the plot
-    output_path = os.path.join(csv_dir, "flow_rate_and_displacement_plot.png")
+    output_path = csv_dir / "flow_rate_and_displacement_plot.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"Plot saved to: {output_path}")
 
@@ -209,7 +210,7 @@ def plot_flow_rate_and_fracture_displacement(
 
 
 def plot_fracture_displacement(
-    csv_dir: str,
+    csv_dir: Path | str,
     file_base: str,
     title=None,
 ) -> None:
@@ -222,8 +223,9 @@ def plot_fracture_displacement(
         csv_dir: Path to directory containing the CSV files.
         file_base: Base name for the CSV file (default: "example_3").
     """
+    csv_dir = Path(csv_dir)
     # Read CSV file for fractures
-    fracture_data = pd.read_csv(os.path.join(csv_dir, f"{file_base}_fractures.csv"))
+    fracture_data = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
 
     # Get time data from fracture data
     time = fracture_data["time"].unique()
@@ -312,7 +314,7 @@ def plot_fracture_displacement(
     fig.tight_layout()
 
     # Save the plot
-    output_path = os.path.join(csv_dir, "fracture_displacement_plot.png")
+    output_path = csv_dir / "fracture_displacement_plot.png"
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"Plot saved to: {output_path}")
 
@@ -320,7 +322,10 @@ def plot_fracture_displacement(
 
 
 def summarize_slip_onset_times(
-    slip_onset_times: dict, fracture_names, velocities, output_file: str = None
+    slip_onset_times: dict,
+    fracture_names,
+    velocities,
+    output_file: Path | str | None = None,
 ) -> None:
     """Save a summary of slip onset times for different simulations."""
     output_string = ""
@@ -340,11 +345,9 @@ def summarize_slip_onset_times(
 
     if output_file is not None:
         # Create directory if it doesn't exist
-        output_dir = os.path.dirname(output_file)
-        if output_dir and not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        with open(output_file, "w") as f:
-            f.write(output_string)
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(output_string)
     else:
         print(output_string)
 
@@ -578,16 +581,15 @@ class CosoExporter:
                     record.update(variables)
                     well_records.append(record)
         df = pd.DataFrame(well_records)
-        folder_name = self.params["data_folder_name"] + "/well_monitoring"
-        if not os.path.exists(folder_name):
-            os.makedirs(folder_name)
+        folder_path = Path(self.params["data_folder_name"]) / "well_monitoring"
+        folder_path.mkdir(parents=True, exist_ok=True)
         df.to_csv(
-            f"{folder_name}/{self.params['file_name']}.csv",
+            folder_path / f"{self.params['file_name']}.csv",
             index=False,
         )
         df_fractures = pd.DataFrame(fracture_records)
         df_fractures.to_csv(
-            f"{folder_name}/{self.params['file_name']}_fractures.csv",
+            folder_path / f"{self.params['file_name']}_fractures.csv",
             index=False,
         )
         self.well_monitoring_data = df
@@ -599,7 +601,7 @@ class CosoExporter:
             self.save_results()
         if not self.params["use_wells"]:
             plot_fracture_displacement(
-                csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
+                csv_dir=Path(self.params["data_folder_name"]) / "well_monitoring",
                 file_base=self.params["file_name"],
                 title=self.create_plot_title(),
             )
@@ -644,10 +646,13 @@ class CosoExporter:
                 if len(var_pair) == 1:
                     plt.title(f"Well Data for {plt_name}")
                     plt.legend()
-                    plt.savefig(
-                        f"{self.params['data_folder_name']}/well_monitoring/"
-                        + f"{self.params['file_name']}_{plt_name}{suffix}.png"
+                    output_path = (
+                        Path(self.params["data_folder_name"])
+                        / "well_monitoring"
+                        / f"{self.params['file_name']}_{plt_name}{suffix}.png"
                     )
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    plt.savefig(output_path)
                     continue
                 # Second variable on right y-axis
                 ax2 = ax1.twinx()
@@ -671,15 +676,14 @@ class CosoExporter:
                 suffix = "_fluxes" if "flux" in var_pair[1] else ""
 
                 plt.title(f"Well Data for {plt_name}")
-                # Ensure the output directory exists
-                if not os.path.exists(
-                    f"{self.params['data_folder_name']}/well_monitoring/"
-                ):
-                    os.makedirs(f"{self.params['data_folder_name']}/well_monitoring/")
-                plt.savefig(
-                    f"{self.params['data_folder_name']}/well_monitoring/"
-                    + f"{self.params['file_name']}_{plt_name}{suffix}.png"
+                # Ensure the output directory exists and save
+                output_path = (
+                    Path(self.params["data_folder_name"])
+                    / "well_monitoring"
+                    / f"{self.params['file_name']}_{plt_name}{suffix}.png"
                 )
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                plt.savefig(output_path)
         if "example_4" in self.params["file_name"]:
             start = 1
         else:
@@ -690,7 +694,7 @@ class CosoExporter:
             )
         well_ind = 1 if "example_8" in self.params["file_name"] else 0
         plot_flow_rate_and_fracture_displacement(
-            csv_dir=f"{self.params['data_folder_name']}/well_monitoring",
+            csv_dir=Path(self.params["data_folder_name"]) / "well_monitoring",
             well_name=self.well_names[well_ind],
             file_base=self.params["file_name"],
             fracture_names=self.fracture_names()[start:],
@@ -712,7 +716,7 @@ class GeometryExporting:
         geometry_exporter = pp.Exporter(
             self.mdg,
             file_name=self.params["file_name"],
-            folder_name=self.params["folder_name"] + "/geometry",
+            folder_name=str(Path(self.params["folder_name"]) / "geometry"),
             export_constants_separately=False,
         )
         geometry_exporter.write_vtu(time_dependent=False)
