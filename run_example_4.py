@@ -1,3 +1,4 @@
+from typing import Sequence
 import re
 
 import porepy as pp
@@ -153,8 +154,11 @@ class ConstraintLineSearchNonlinearSolver(
 
 
 def create_schedule(
-    production_period: float, dt: float, shut_in_duration: float = pp.DAY
-) -> tuple[np.ndarray, list[tuple[float, float]]]:
+    production_period: float,
+    dt: float,
+    shut_in_duration: float = pp.DAY,
+    final_time: float = 4 * pp.YEAR,
+) -> tuple[np.ndarray, Sequence[tuple[float, float]]]:
     """Create a time schedule for the simulation based on production period and time step.
 
     Generates a time schedule that includes both the production period and additional
@@ -166,6 +170,7 @@ def create_schedule(
         production_period: The total production period in years.
         dt: The desired time step size in years.
         shut_in_duration: The duration of shut-in periods in years (default is 1 day).
+        final_time: The total simulation time in years (default is 4 years).
 
     Returns:
         tuple: A tuple containing:
@@ -173,29 +178,47 @@ def create_schedule(
             - neumann_intervals (list of tuples): A list of time intervals where Neumann
               boundary conditions are applied.
     """
-    schedule = np.array(
+    # Calculate the number of production periods needed to cover the final time
+    n = int(np.ceil(final_time / production_period))
+    # Create a schedule with production periods and shut-in durations.
+    schedule = np.hstack(
         [
-            0,
-            2 * dt,  # Initial time steps with closed wells
-            # pp.DAY,  # Ramp up to operation
-            production_period - shut_in_duration,  # First shut-in
-            production_period,  # Restart operation
-            2 * production_period - shut_in_duration,  # Second shut-in
-            2 * production_period,  # End second shut-in and end of simulation
-            3 * production_period - shut_in_duration,  # Second shut-in
-            3 * production_period,  # End second shut-in and end of simulation
-            4 * production_period - shut_in_duration,  # Second shut-in
-            4 * production_period,  # End second shut-in and end of simulation
+            [i * production_period - shut_in_duration, i * production_period]
+            for i in np.arange(1, n + 1)
         ]
     )
-    # Lazy way to determine if we have the initial closed well steps or not. TODO:
-    # Remove hack.
-    offset = 2 if schedule[1] < 2 * pp.DAY else 1
+    # Create a list of Neumann intervals corresponding to the shut-in periods.
     neumann_intervals = [
-        (schedule[2 * i + offset], schedule[2 * i + offset + 1])
-        for i in range(schedule.size // 2 - 1)
+        (i * production_period - shut_in_duration, i * production_period)
+        for i in np.arange(1, n + 1)
     ]
+    # Add the initial time step at 0 to the schedule.
+    schedule = np.insert(schedule, 0, 0.0)
+
     return schedule, neumann_intervals
+
+
+def time_managers(schedule: np.ndarray, dt: float, production_period: float):
+    time_manager = pp.TimeManager(
+        schedule=schedule,
+        dt_init=dt,
+        dt_min_max=(1e-2, max(dt, production_period / 5)),
+        iter_max=20,
+        iter_optimal_range=(5, 12),
+        iter_relax_factors=(0.6, 2.0),
+        recomp_factor=0.3,
+        recomp_max=10,
+    )
+    dt_init = 5e9  # * pp.YEAR
+    time_manager_init = pp.TimeManager(
+        [0, 2 * dt_init],
+        dt_init=dt_init,
+        dt_min_max=(1, 2 * dt_init),
+        iter_max=20,
+        iter_optimal_range=(5, 12),
+        constant_dt=False,
+    )
+    return time_manager, time_manager_init
 
 
 if __name__ == "__main__":
@@ -239,27 +262,10 @@ if __name__ == "__main__":
                 logger.info("=" * 80)
 
                 schedule, neumann_intervals = create_schedule(production_period, dt)
-                # Add the initial time step to the schedule
-                # schedule = np.insert(schedule, 0, 0)  # Initial time step at 0
-                time_manager = pp.TimeManager(
-                    schedule=schedule,
-                    dt_init=dt,
-                    dt_min_max=(1e-2, max(dt, production_period / 5)),
-                    iter_max=20,
-                    iter_optimal_range=(5, 12),
-                    iter_relax_factors=(0.6, 2.0),
-                    recomp_factor=0.3,
-                    recomp_max=10,
+                time_manager, time_manager_init = time_managers(
+                    schedule, dt, production_period
                 )
-                dt_init = 5e9  # * pp.YEAR
-                time_manager_init = pp.TimeManager(
-                    [0, 2 * dt_init],
-                    dt_init=dt_init,
-                    dt_min_max=(1, 2 * dt_init),
-                    iter_max=20,
-                    iter_optimal_range=(5, 12),
-                    constant_dt=False,
-                )
+
                 init_granodiorite_values = copy.deepcopy(granodiorite_values)
                 simulation_name = (
                     f"velocity_{velocity:.1e}_period_{period}_" + well_name
@@ -392,7 +398,7 @@ if __name__ == "__main__":
                 )
                 pp.run_time_dependent_model(model, solver_params)
                 model.plot_well_monitoring()
-                slip_onset_times[simulation_name] = model.sliding_onset_times()
+                slip_onset_times[simulation_name] = model.slip_onset_times()
     # Summarize the slip onset times in a CSV file.
     summarize_slip_onset_times(
         slip_onset_times,
