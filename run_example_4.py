@@ -388,13 +388,24 @@ if __name__ == "__main__":
                             "pc_hypre_boomeramg_ilu_drop_tol": 1e-5,
                         },
                         # Options for the temperature block in the first stage of CPR.
+                        # "cpr0_energy": {"pc_type": "hypre", "pc_hypre_type": "ilu"},
                         "cpr0_energy": {"pc_type": "ilu"},
+                        "cpr1": {
+                            "pc_type": "hypre",
+                            "pc_hypre_type": "ilu",
+                            "pc_hypre_ilu_level": 1,
+                            # "pc_hypre_ilu_drop_tol": 1e-5,
+                        },
                         "gmres": {
                             # Options for the outer solver
                             "ksp_monitor": None,
-                            # "ksp_type": "fgmres",
+                            "ksp_type": "gmres",
                             "ksp_max_it": 400,
                         },
+                        # "cpr_composite": {
+                        #     "ksp_type": "gmres",
+                        #     "ksp_rtol": 1e-6,
+                        # },
                     }
                     model_params_init["linear_solver"]["options"] = linear_solver_params
 
