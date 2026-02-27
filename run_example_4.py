@@ -12,6 +12,8 @@ from boundary_conditions import (
     CosoBoundaryConditionsDisplacement,
     NeumannWellBCsFromSchedule,
 )
+from porepy.applications.test_utils.models import add_mixin
+import pp_solvers
 
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
     BoundaryConditionsMechanicsNeumann,
@@ -224,7 +226,7 @@ use_iterative_solver = True
 
 if __name__ == "__main__":
     tp = True
-    copy_plots = True
+    copy_plots = False
     if LOG_TO_FILE:
         print(f"Logging to file: {log_file}")
         clean_logs = False
@@ -246,7 +248,7 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 4.0e3
                 fracture_size = 5e2
-                cell_size = 10e2
+                cell_size = 8e2
 
                 # Log run configuration
                 logger.info("=" * 80)
@@ -303,7 +305,7 @@ if __name__ == "__main__":
                         "solid": pp.SolidConstants(**init_granodiorite_values),
                         "fluid": pp.FluidComponent(**pp.fluid_values.water),
                     },
-                    "units": pp.Units(m=1.0, kg=1.0e0, K=1.0),
+                    "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
                     "time_manager": time_manager_init,
                     "grid_type": "simplex",
                     "meshing_arguments": {
@@ -379,32 +381,41 @@ if __name__ == "__main__":
                     }
                     linear_solver_params = {
                         # Options for mechanics.
-                        "mechanics_amg": {
-                            "pc_hypre_boomeramg_strong_threshold": 0.9,
-                            "pc_hypre_boomeramg_smooth_type": "ilu",
-                            "pc_hypre_boomeramg_ilu_level": 1,
-                            # "ksp_type": "gmres",
-                            # "ksp_rtol": 1e-6,
-                            "pc_hypre_boomeramg_ilu_drop_tol": 1e-5,
-                        },
-                        # Options for the temperature block in the first stage of CPR.
+                        # "mechanics_amg": {
+                        #     "pc_hypre_boomeramg_strong_threshold": 0.9,
+                        #     "pc_hypre_boomeramg_smooth_type": "ilu",
+                        #     "pc_hypre_boomeramg_ilu_level": 1,
+                        #     # "ksp_type": "gmres",
+                        #     # "ksp_rtol": 1e-6,
+                        #     # "ksp_monitor": None,
+                        #     "pc_hypre_boomeramg_ilu_drop_tol": 1e-5,
+                        # },
+                        # # Options for the temperature block in the first stage of CPR.
                         # "cpr0_energy": {"pc_type": "hypre", "pc_hypre_type": "ilu"},
-                        "cpr0_energy": {"pc_type": "ilu"},
-                        "cpr1": {
-                            "pc_type": "hypre",
-                            "pc_hypre_type": "ilu",
-                            "pc_hypre_ilu_level": 1,
-                            # "pc_hypre_ilu_drop_tol": 1e-5,
-                        },
+                        # # "cpr0_energy": {"pc_type": "ilu"},
+                        # "cpr1": {
+                        #     "pc_type": "hypre",
+                        #     "pc_hypre_type": "ilu",
+                        #     "pc_hypre_ilu_level": 1,
+                        #     # "pc_hypre_ilu_drop_tol": 1e-5,
+                        # },
                         "gmres": {
                             # Options for the outer solver
                             "ksp_monitor": None,
-                            "ksp_type": "gmres",
+                            # "ksp_type": "fgmres",
                             "ksp_max_it": 400,
+                            # "ksp_gmres_classicalgramschmidt": False,
                         },
                         # "cpr_composite": {
                         #     "ksp_type": "gmres",
-                        #     "ksp_rtol": 1e-6,
+                        #     "ksp_rtol": 1e-10,
+                        # # },
+                        # "interface_flow": {
+                        #     "pc_type": "none",
+                        #     # "pc_hypre_type": "ilu",
+                        #     "ksp_monitor": None,
+                        #     "ksp_type": "gmres",
+                        #     "ksp_rtol": 1e-12,
                         # },
                     }
                     model_params_init["linear_solver"]["options"] = linear_solver_params
