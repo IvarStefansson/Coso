@@ -93,7 +93,7 @@ class HeterogeneousPermeabilitySpecification:
         vals = self.solid.permeability * np.ones(size)
         high_perm_zones = self._high_perm_zones(cc)
         # Set permeability in the high permeability zones.
-        vals[high_perm_zones] *= 200
+        vals[high_perm_zones] *= 100
         permeability = pp.wrap_as_dense_ad_array(
             vals, size, name="heterogeneous_permeability"
         )
@@ -113,7 +113,8 @@ class HeterogeneousPermeabilitySpecification:
         zone_x = np.logical_and(cc[0, :] > dx / 3, cc[0, :] < 2 * dx / 3)
         zone_y = np.logical_and(cc[1, :] > dy / 3, cc[1, :] < 2 * dy / 3)
         zone_z = np.logical_and(-cc[2, :] > dz / 3, -cc[2, :] < 2 * dz / 3)
-        return np.logical_and.reduce((zone_x, zone_y, zone_z))
+        return zone_z
+        # return np.logical_and.reduce((zone_x, zone_y, zone_z))
 
 
 class FluidExtensions:

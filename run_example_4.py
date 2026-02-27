@@ -1,3 +1,4 @@
+import shutil
 from typing import Sequence
 import re
 
@@ -39,15 +40,19 @@ import sys
 import copy
 import os
 from datetime import datetime
+import warnings
 
-LOG_TO_FILE = True
+# Suppress multiprocessing semaphore warnings (common when debugging)
+warnings.filterwarnings("ignore", ".*semaphore.*resource_tracker.*")
+
+LOG_TO_FILE = False
 log_dir = "example_4_logs"
+
 
 if LOG_TO_FILE:
     # Create log directory if it doesn't exist
     os.makedirs(log_dir, exist_ok=True)
 
-    # Generate timestamped log filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"run_example_4_{timestamp}.log")
 
@@ -72,13 +77,6 @@ if LOG_TO_FILE:
 else:
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.INFO)
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 
 class BaseModel(
@@ -211,7 +209,7 @@ def time_managers(schedule: np.ndarray, dt: float, production_period: float):
     )
     dt_init = 5e9  # * pp.YEAR
     time_manager_init = pp.TimeManager(
-        [0, 2 * dt_init],
+        [0, 5 * dt_init],
         dt_init=dt_init,
         dt_min_max=(1, 2 * dt_init),
         iter_max=20,
@@ -223,8 +221,9 @@ def time_managers(schedule: np.ndarray, dt: float, production_period: float):
 
 if __name__ == "__main__":
     tp = True
+    copy_plots = True
     if LOG_TO_FILE:
-        print("Logging to file: " + log_dir + "/" + log_file)
+        print(f"Logging to file: {log_file}")
         clean_logs = False
         if clean_logs:
             for f in os.listdir(log_dir):
@@ -234,7 +233,7 @@ if __name__ == "__main__":
     boundary_velocities = [0.0, 2.0e-6, 5.0e-6]
 
     # boundary_velocities = [5.0, 15.0]
-    production_periods = [0.5, 1.0]  # In years
+    production_periods = [0.5, 1]  # In months
     slip_onset_times = {}
     for velocity in boundary_velocities:
         for well_name, well_endpoint in cases:
@@ -268,7 +267,7 @@ if __name__ == "__main__":
 
                 init_granodiorite_values = copy.deepcopy(granodiorite_values)
                 simulation_name = (
-                    f"velocity_{velocity:.1e}_period_{period}_" + well_name
+                    f"velocity_{velocity:.0e}_period_{period:.0e}_" + well_name
                 )
                 folder_name = "Case_I/" + simulation_name
                 folder_name_init = folder_name + "_initialization"
@@ -278,6 +277,22 @@ if __name__ == "__main__":
                     + f", Velocity = {velocity:.1e} m/y, Production period = {period} y"
                 )
                 title = title[0].upper() + title[1:]
+                if copy_plots:
+                    # Copy the plots from previous runs to the new folder for comparison.
+                    dest_folder = "figures/Case I/"
+                    source = (
+                        folder_name
+                        + "_saved_data/well_monitoring/flow_rate_and_displacement_plot.png"
+                    )
+                    os.makedirs(dest_folder, exist_ok=True)
+                    dest = os.path.join(
+                        dest_folder, f"{simulation_name}_flow_and_disp.png"
+                    )
+                    if os.path.exists(source):
+                        shutil.copyfile(source, dest)
+                        logger.info(f"Copied plot from {source} to {dest}")
+
+                    continue
                 model_params_init = {
                     "plot_title": title,
                     "domain_sizes": np.full(3, domain_size),
@@ -297,7 +312,7 @@ if __name__ == "__main__":
                     "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
                     "use_wells": False,
                     "reference_variable_values": pp.ReferenceVariableValues(
-                        temperature=350.0,
+                        temperature=pp.Celsius_to_Kelvin(50)
                         #     pressure=pp.BAR,
                     ),
                     "thermal_gradient": 7e-2,
@@ -314,10 +329,11 @@ if __name__ == "__main__":
                             )
                         ),
                     },
-                    "boundary_displacement_velocity_scaling": velocity / pp.YEAR,
                     "heterogeneous_permeability": True,
                     "darcy_flux_discretization": "tpfa" if tp else "mpfa",
                     "fourier_flux_discretization": "tpfa" if tp else "mpfa",
+                    "use_ic_interpolation": True,
+                    "boundary_displacement_velocity": velocity / pp.YEAR,
                 }
                 model_params = copy.deepcopy(model_params_init)
                 # Reduce target pressure in favour of displacement BC as driving force?
@@ -393,16 +409,17 @@ if __name__ == "__main__":
                     {
                         "local_line_search": 1,
                         "global_line_search": 1,
-                        "nl_convergence_res_atol": 1e0,
+                        # "nl_convergence_res_atol": 1e0,
                     }
                 )
                 pp.run_time_dependent_model(model, solver_params)
                 model.plot_well_monitoring()
                 slip_onset_times[simulation_name] = model.slip_onset_times()
     # Summarize the slip onset times in a CSV file.
-    summarize_slip_onset_times(
-        slip_onset_times,
-        model.fracture_names(),
-        boundary_velocities,
-        output_file=folder_name + "/saved_data/slip_onset_times.csv",
-    )
+    if not copy_plots:
+        summarize_slip_onset_times(
+            slip_onset_times,
+            model.fracture_names(),
+            boundary_velocities,
+            output_file=folder_name + "/saved_data/slip_onset_times.csv",
+        )

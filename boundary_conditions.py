@@ -156,10 +156,8 @@ class CosoBoundaryConditionsDisplacement:
         # The relative displacement rate is approx. 24 + 14 mm/year.
         # The side length of the Coso Geothermal Field is roughly 10 km.
         # rate = (38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR)
-        rate = self.params.get(
-            "boundary_displacement_velocity",
-            38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR,
-        )
+        rate = self.params.get("boundary_displacement_velocity")
+        # , 38 * pp.MILLI * pp.METER / (10 * (pp.KILO * pp.METER)) / pp.YEAR,)
         return self.units.convert_units(rate, "s^-1") * np.array([1.0, 0.0, 0.0])
 
 
@@ -400,8 +398,8 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
         sd = bg.parent
         # Ignore super call for type checking, as it is assumed to be present for this
         # mixin class.
-        values = super().bc_values_pressure(bg)  # type: ignore[misc]
-        if self.is_well_grid(sd):
+        values = super().bc_values_darcy_flux(bg)  # type: ignore[misc]
+        if self.is_well_grid(sd) and "darcy_fluxes" in self.well_protocol_variables():
             well = self.well_network.wells[sd.tags["parent_well_index"]]
             well_tag = well.tags["well_name"]
             protocol = self.well_protocols()[well_tag]
@@ -420,10 +418,9 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
             )
         return values
 
-    @property
     def well_protocol_variables(self) -> list[str]:
         """List of variable names for which well protocols are defined."""
-        return ["temperatures", "pressures", "darcy_fluxes"]
+        return ["temperatures", "pressures"]
 
 
 class OnlyInjectionWellNeumannBCsFromSchedule(NeumannWellBCsFromSchedule):
@@ -451,7 +448,7 @@ class OnlyInjectionWellNeumannBCsFromSchedule(NeumannWellBCsFromSchedule):
             # Initialize protocol dictionary for the well.
             protocols[well_tag] = {}
             # Set values for temperatures and pressures.
-            for variable in self.well_protocol_variables:
+            for variable in self.well_protocol_variables():
                 input_values = self.params.get(f"{well_tag}_{variable}", 0.0)
                 if isinstance(input_values, (float, int)):
                     # Broadcast single value to all time steps for convenient user

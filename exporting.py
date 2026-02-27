@@ -338,9 +338,9 @@ def summarize_slip_onset_times(
         for velocity in velocities:
             output_string += f"Velocity: {velocity}\n"
             for simulation, times in slip_onset_times.items():
-                if f"velocity_{velocity:.1f}_" in simulation and fracture in times:
+                if f"velocity_{velocity:.0e}_" in simulation and fracture in times:
                     output_string += f"  {simulation}: {times[fracture]:.2f} seconds\n"
-                elif f"velocity_{velocity:.1f}_" in simulation:
+                elif f"velocity_{velocity:.0e}_" in simulation:
                     output_string += f"  {simulation}: Not found\n"
 
     if output_file is not None:
@@ -506,17 +506,19 @@ class CosoExporter:
             parent_well = self.parent_well(sd)
             # Get the face normals for the top face. We stay consistent with the pp
             # convention of having positive outward fluxes.
-            flux_sign = np.sign(sd.face_normals[-1, top_faces])
+            flux_sign = np.sign(sd.face_normals[-1, top_faces])[0]
 
             data[parent_well.tags["well_name"]] = {
-                "pressure": pressure_trace[face_offsets[id] : face_offsets[id + 1]][
-                    top_faces
-                ][0],
-                "darcy_flux": darcy_f[face_offsets[id] : face_offsets[id + 1]][
-                    top_faces
-                ][0]
-                * flux_sign,
-                "fluid_flux": (
+                "pressure": float(
+                    pressure_trace[face_offsets[id] : face_offsets[id + 1]][top_faces][
+                        0
+                    ]
+                ),
+                "darcy_flux": float(
+                    darcy_f[face_offsets[id] : face_offsets[id + 1]][top_faces][0]
+                    * flux_sign
+                ),
+                "fluid_flux": float(
                     fluid_f[face_offsets[id] : face_offsets[id + 1]][top_faces][0]
                     * flux_sign
                 ),
@@ -525,13 +527,17 @@ class CosoExporter:
                 top_cell = np.argsort(self.depth(sd.cell_centers))[0]
                 data[parent_well.tags["well_name"]].update(
                     {
-                        "temperature": temperature[
-                            cell_offsets[id] : cell_offsets[id + 1]
-                        ][top_cell],
-                        "enthalpy_flux": enthalpy_f[
-                            face_offsets[id] : face_offsets[id + 1]
-                        ][top_faces][0]
-                        * flux_sign,
+                        "temperature": float(
+                            temperature[cell_offsets[id] : cell_offsets[id + 1]][
+                                top_cell
+                            ]
+                        ),
+                        "enthalpy_flux": float(
+                            enthalpy_f[face_offsets[id] : face_offsets[id + 1]][
+                                top_faces
+                            ][0]
+                            * flux_sign
+                        ),
                     }
                 )
         fracs = self.mdg.subdomains(dim=self.nd - 1)
@@ -558,7 +564,7 @@ class CosoExporter:
                 )
                 / np.sum(fracs[id].cell_volumes),
             }
-            data[key]["slip_tendency"] = np.mean(
+            data[key]["slip_tendency"] = np.nanmean(
                 slip_tendency[cell_offsets[id] : cell_offsets[id + 1]]
             )
         return data
