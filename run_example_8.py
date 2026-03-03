@@ -156,8 +156,8 @@ if __name__ == "__main__":
         ]
     )
     strike = fracture_strike_angles[0]
-    granodiorite_values["permeability"] = 1e-16
-    granodiorite_values["residual_aperture"] = 5.0e-4  # just changed from 3e-4
+    # granodiorite_values["permeability"] = 1e-16
+    granodiorite_values["residual_aperture"] = 8.0e-4  # just changed from 3e-4
     granodiorite_values["dilation_angle"] = 0  # np.deg2rad(1)
     granodiorite_values["porosity"] = 0.02
 
@@ -192,8 +192,8 @@ if __name__ == "__main__":
 
                 logger.info(f"Starting the simulation with suffix {suffix}")
                 dt = 5e2
-                period = 100 * pp.DAY
-                transition_time = 10 * pp.HOUR
+                period = pp.YEAR / 2
+                transition_time = pp.DAY
                 # period = 1e4
                 # transition_time = 5e3
                 # Alternate between warm and cold injection every period, with a short
@@ -253,12 +253,12 @@ if __name__ == "__main__":
                 )
                 fracture_size = 6e2
                 # fracture_size = 1e3
-                cell_size = 10e2
+                cell_size = 14e2
 
-                folder_name = "case_III/" + suffix
-                folder_name_init = folder_name + "_initialization"
+                folder_name = Path("case_III") / suffix
+                folder_name_init = str(folder_name) + "_initialization"
                 file_name = "example_8"
-                data_folder_name = f"{folder_name}_saved_data"
+                data_folder_name = Path(str(folder_name) + "_saved_data")
                 strike_angles = np.deg2rad([45, 45, 45])
                 strike_angles[angle_index] = np.deg2rad(strike)
                 title = (
@@ -281,7 +281,7 @@ if __name__ == "__main__":
                         "cell_size_fracture": 0.3 * fracture_size,
                     },
                     "file_name": file_name,
-                    "data_folder_name": data_folder_name,
+                    "data_folder_name": str(data_folder_name),
                     "adaptive_indicator_scaling": True,
                     "initialization": True,
                     "use_wells": False,
@@ -309,7 +309,7 @@ if __name__ == "__main__":
                 }
                 model_params = copy.deepcopy(model_params_init)
                 # Reduce target pressure in favour of displacement BC as driving force?
-                injection_pressures = np.full(schedule.shape, 0.2 * pp.MEGA * pp.PASCAL)
+                injection_pressures = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
                 # injection_pressures = np.full(schedule.shape, 10* pp.ATMOSPHERIC_PRESSURE)
                 # injection_pressures[0] = .5 * pp.MEGA * pp.PASCAL  # Initial pressure
                 # injection_pressures[:1] = 1 * pp.ATMOSPHERIC_PRESSURE
@@ -383,15 +383,14 @@ if __name__ == "__main__":
                 granodiorite_values["friction_coefficient"] = friction_coeff
                 # Save granodiorite values for main model
                 df = pandas.DataFrame.from_dict(granodiorite_values, orient="index")
-                output_path = Path(data_folder_name) / "granodiorite_values.csv"
-                if not output_path.parent.exists():
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path = data_folder_name / "granodiorite_values.csv"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
                 df.to_csv(output_path, header=False)
                 model_params.update(
                     {
                         "time_manager": time_manager,
                         "file_name": file_name,
-                        "folder_name": folder_name,
+                        "folder_name": str(folder_name),
                         "use_wells": True,
                         "initialization": False,
                         "reference_from_initial": True,
@@ -434,11 +433,11 @@ if __name__ == "__main__":
 
     # Save injection fluxes for all simulations in a CSV file.
     injection_fluxes_df = pandas.DataFrame(injection_fluxes)
-    injection_fluxes_output_path = Path(data_folder_name) / "injection_fluxes.csv"
+    injection_fluxes_output_path = data_folder_name / "injection_fluxes.csv"
     injection_fluxes_df.to_csv(injection_fluxes_output_path, index=False)
     summarize_slip_onset_times(
         all_slip_onset_times,
         model.fracture_names(),
         boundary_velocities,
-        output_file=str(Path(data_folder_name) / "slip_onset_times.csv"),
+        output_file=data_folder_name / "slip_onset_times.csv",
     )
