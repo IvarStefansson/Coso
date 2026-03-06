@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
 
-DISPLACEMENT_JUMP_Y_MIN = 1e-10
+DISPLACEMENT_JUMP_Y_MIN = None
 
 
 def plot_flow_rate_and_fracture_displacement(
@@ -118,21 +118,32 @@ def plot_flow_rate_and_fracture_displacement(
             fracture_data_filtered["fracture_id"] == fracture_name
         ]
         fracture_subset = fracture_subset.iloc[inds].reset_index(drop=True)
-        ax2.semilogy(
-            time,
-            np.clip(
-                fracture_subset["displacement_jump"],
-                a_min=DISPLACEMENT_JUMP_Y_MIN,
-                a_max=None,
-            ),
-            color=color,
-            linewidth=2,
-            markersize=4,
-            label=f"Displacement Jump on {fracture_name}",  # ({fracture_mapping[fracture_name]})",
-        )
+        if DISPLACEMENT_JUMP_Y_MIN is not None:
+            ax2.semilogy(
+                time,
+                np.clip(
+                    fracture_subset["displacement_jump"],
+                    a_min=DISPLACEMENT_JUMP_Y_MIN,
+                    a_max=None,
+                ),
+                color=color,
+                linewidth=2,
+                markersize=4,
+                label=f"Displacement Jump on {fracture_name}",
+            )
+            ax2.tick_params(axis="y")
+            ax2.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
 
-    ax2.tick_params(axis="y")
-    ax2.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
+        else:
+            ax2.plot(
+                time,
+                fracture_subset["displacement_jump"],
+                color=color,
+                linewidth=2,
+                markersize=4,
+                label=f"Displacement Jump on {fracture_name}",
+            )
+
     if temperature_schedule is None:
         line1 = ax1.plot(
             time,
@@ -284,23 +295,35 @@ def plot_fracture_displacement(
         fracture_subset = fracture_subset[fracture_subset["time"].isin(accepted_times)]
 
         color = color_map.get(idx, f"C{idx}")
-        ax.semilogy(
-            fracture_subset["time"],
-            np.clip(
+        if DISPLACEMENT_JUMP_Y_MIN is not None:
+            ax.semilogy(
+                fracture_subset["time"],
+                np.clip(
+                    fracture_subset["displacement_jump"],
+                    a_min=DISPLACEMENT_JUMP_Y_MIN,
+                    a_max=None,
+                ),
+                color=color,
+                linewidth=2,
+                marker="o",
+                markersize=4,
+                label=f"{fracture_name}",
+            )
+            ax.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
+
+        else:
+            ax.plot(
+                fracture_subset["time"],
                 fracture_subset["displacement_jump"],
-                a_min=DISPLACEMENT_JUMP_Y_MIN,
-                a_max=None,
-            ),
-            color=color,
-            linewidth=2,
-            marker="o",
-            markersize=4,
-            label=f"{fracture_name}",  # ({fracture_mapping.get(fracture_name, '')})",
-        )
+                color=color,
+                linewidth=2,
+                marker="o",
+                markersize=4,
+                label=f"{fracture_name}",
+            )
 
     ax.set_xlabel("Time (s)", fontsize=12)
     ax.set_ylabel("Displacement Jump (m)", fontsize=12)
-    ax.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
     ax.legend(loc="best", fontsize=10, framealpha=0.9, edgecolor="black")
     ax.grid(True, alpha=0.3)
     if title is None:

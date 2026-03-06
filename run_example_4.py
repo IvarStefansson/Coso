@@ -251,7 +251,7 @@ def log_summary(
     logger.info("=" * 80)
 
 
-use_iterative_solver = False
+use_iterative_solver = True
 if use_iterative_solver and "pp_solvers" not in sys.modules:
     raise ImportError(
         "pp_solvers module is required for iterative solvers. Please install pp_solvers"
@@ -302,7 +302,9 @@ if __name__ == "__main__":
                     production_period = period * pp.YEAR
                     domain_size = 4.0e3
                     fracture_size = 5e2
-                    cell_size = 10e2
+                    refinement = 0.4 if use_iterative_solver else 1.0
+                    cell_size = 10e2 * refinement
+                    cell_size_fracture = 0.6 * fracture_size * refinement
 
                     schedule, neumann_intervals = create_schedule(production_period)
                     time_manager, time_manager_init = time_managers(
@@ -344,7 +346,7 @@ if __name__ == "__main__":
                         "grid_type": "simplex",
                         "meshing_arguments": {
                             "cell_size": cell_size,
-                            "cell_size_fracture": 0.7 * fracture_size,
+                            "cell_size_fracture": cell_size_fracture,
                         },
                         "file_name": file_name,
                         "data_folder_name": f"{folder_name}_saved_data",
