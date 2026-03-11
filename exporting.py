@@ -464,7 +464,7 @@ class CosoExporter:
                 (
                     sd,
                     "depth",
-                    self.units.convert_units(depth, "m"),
+                    self.units.convert_units(depth, "m", to_si=True),
                 )
             )
             density = self.fluid.density([sd]).value(self.equation_system)
@@ -472,7 +472,7 @@ class CosoExporter:
                 (
                     sd,
                     "density",
-                    self.units.convert_units(density, "kg * m^-3"),
+                    self.units.convert_units(density, "kg * m^-3", to_si=True),
                 )
             )
             if sd.dim == self.nd - 1:
@@ -497,7 +497,7 @@ class CosoExporter:
                         sd,
                         "hydrostatic_pressure",
                         self.units.convert_units(
-                            self.hydrostatic_pressure(depth), "Pa"
+                            self.hydrostatic_pressure(depth), "Pa", to_si=True
                         ),
                     )
                 )
