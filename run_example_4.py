@@ -40,7 +40,6 @@ from initial_conditions import CopyInitialCondition
 from solver_configurations import linear_solver_params, solver_params
 from exporting import CosoExporter, GeometryExporting, summarize_slip_onset_times
 from wells import WellDataConceptual
-import diff_tpfa
 import logging
 import sys
 import copy
@@ -151,8 +150,8 @@ class MainModel(
 
 def create_schedule(
     production_period: float,
-    shut_in_duration: float = 2 * pp.DAY,
-    final_time: float = 4 * pp.YEAR,
+    shut_in_duration: float = 3 * pp.DAY,
+    final_time: float = 6 * pp.YEAR,
 ) -> tuple[np.ndarray, Sequence[tuple[float, float]]]:
     """Create a time schedule for the simulation based on production period and time step.
 
@@ -250,7 +249,7 @@ def log_summary(
     logger.info("=" * 80)
 
 
-use_iterative_solver = False
+use_iterative_solver = True
 if use_iterative_solver and "pp_solvers" not in sys.modules:
     raise ImportError(
         "pp_solvers module is required for iterative solvers. Please install pp_solvers"
@@ -262,7 +261,7 @@ boundary_velocities = [
     0.0,
     1.0e-6,
     2.0e-6,
-    5.0e-6,
+    # 5.0e-6,
 ]
 thermal_expansions = [
     granodiorite_values["thermal_expansion"],
@@ -275,7 +274,7 @@ production_periods = [
 ]  # In years
 if __name__ == "__main__":
     tp = True
-    copy_plots = True
+    copy_plots = False
     if LOG_TO_FILE:
         print(f"Logging to file: {log_file}")
         clean_logs = False
@@ -294,8 +293,8 @@ if __name__ == "__main__":
                     production_period = period * pp.YEAR
                     domain_size = 4.0e3
                     fracture_size = 5e2
-                    refinement = 0.6 if use_iterative_solver else 1.0
-                    cell_size = 8e2 * refinement
+                    refinement = 0.3 if use_iterative_solver else 1.0
+                    cell_size = 11e2 * refinement
                     cell_size_fracture = 0.6 * fracture_size * refinement
 
                     schedule, neumann_intervals = create_schedule(production_period)
