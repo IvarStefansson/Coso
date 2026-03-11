@@ -151,7 +151,7 @@ class MainModel(
 
 def create_schedule(
     production_period: float,
-    shut_in_duration: float = pp.DAY,
+    shut_in_duration: float = 2 * pp.DAY,
     final_time: float = 4 * pp.YEAR,
 ) -> tuple[np.ndarray, Sequence[tuple[float, float]]]:
     """Create a time schedule for the simulation based on production period and time step.
@@ -163,7 +163,7 @@ def create_schedule(
 
     Parameters:
         production_period: The total production period in years.
-        shut_in_duration: The duration of shut-in periods in years (default is 1 day).
+        shut_in_duration: The duration of shut-in periods in years (default is 2 days).
         final_time: The total simulation time in years (default is 4 years).
 
     Returns:
@@ -204,9 +204,8 @@ def names_from_params(
     folder_name_init = folder_name + "_initialization"
     file_name = "example_4"
     title = (
-        well_name.replace("_", " ")
-        + f", Velocity = {velocity:.1e} m/y, Production period = "
-        + f"{period} y, Thermal expansion = {thermal_expansion:.1e} 1/K"
+        well_name.replace("_", " ") + f", Boundary velocity = {velocity:.1e} m/y, "
+        # + f"Thermal exp. = {thermal_expansion:.1e} 1/K"
     )
     title = title[0].upper() + title[1:]
     return simulation_name, folder_name, folder_name_init, file_name, title
@@ -251,7 +250,7 @@ def log_summary(
     logger.info("=" * 80)
 
 
-use_iterative_solver = True
+use_iterative_solver = False
 if use_iterative_solver and "pp_solvers" not in sys.modules:
     raise ImportError(
         "pp_solvers module is required for iterative solvers. Please install pp_solvers"
@@ -274,10 +273,9 @@ production_periods = [
     0.5,
     1.0,
 ]  # In years
-
 if __name__ == "__main__":
     tp = True
-    copy_plots = False
+    copy_plots = True
     if LOG_TO_FILE:
         print(f"Logging to file: {log_file}")
         clean_logs = False
@@ -291,19 +289,13 @@ if __name__ == "__main__":
         for well_name, well_endpoint in cases:
             for period in production_periods:
                 for thermal_expansion in thermal_expansions:
-                    log_summary(
-                        well_name,
-                        thermal_expansion,
-                        velocity,
-                        period,
-                    )
                     # Define the time parameters
                     dt = 1e2
                     production_period = period * pp.YEAR
                     domain_size = 4.0e3
                     fracture_size = 5e2
-                    refinement = 0.4 if use_iterative_solver else 1.0
-                    cell_size = 10e2 * refinement
+                    refinement = 0.6 if use_iterative_solver else 1.0
+                    cell_size = 8e2 * refinement
                     cell_size_fracture = 0.6 * fracture_size * refinement
 
                     schedule, neumann_intervals = create_schedule(production_period)
@@ -334,6 +326,12 @@ if __name__ == "__main__":
                             logger.info(f"Copied plot from {source} to {dest}")
 
                         continue
+                    log_summary(
+                        well_name,
+                        thermal_expansion,
+                        velocity,
+                        period,
+                    )
                     model_params_init = {
                         "plot_title": title,
                         "domain_sizes": np.full(3, domain_size),
@@ -466,5 +464,4 @@ if __name__ == "__main__":
                         }
                     )
                     pp.run_time_dependent_model(model, solver_params)
-                    model.plot_well_monitoring()
                     slip_onset_times[simulation_name] = model.slip_onset_times()

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
 
-DISPLACEMENT_JUMP_Y_MIN = None
+JUMP_RANGE = (1e-8, 5e-4)
 
 
 def plot_flow_rate_and_fracture_displacement(
@@ -23,6 +23,9 @@ def plot_flow_rate_and_fracture_displacement(
     fracture_names,
     title=None,
     temperature_schedule=None,
+    out_path=None,
+    semilogy=False,
+    create_legend=True,
 ) -> None:
     """
     Plot fluid flux from production well and displacement jump of first two fractures.
@@ -35,6 +38,7 @@ def plot_flow_rate_and_fracture_displacement(
         csv_dir: Path to directory containing the CSV files.
         well_name: Name of the production well to plot (default: "16A-20").
     """
+    separate_legend = True
     csv_dir = Path(csv_dir)
     # Read CSV files
     well_data = pd.read_csv(csv_dir / f"{file_base}.csv")
@@ -79,7 +83,7 @@ def plot_flow_rate_and_fracture_displacement(
     ].copy()
 
     # Create figure with two y-axes
-    fig, ax1 = plt.subplots(figsize=(12, 6))
+    fig, ax1 = plt.subplots(figsize=(6, 4))
 
     # Plot fluid flux on left axis
     flux_colors = ["tab:red", "tab:purple", "tab:blue", "tab:purple"]
@@ -118,21 +122,16 @@ def plot_flow_rate_and_fracture_displacement(
             fracture_data_filtered["fracture_id"] == fracture_name
         ]
         fracture_subset = fracture_subset.iloc[inds].reset_index(drop=True)
-        if DISPLACEMENT_JUMP_Y_MIN is not None:
+        if semilogy:
             ax2.semilogy(
                 time,
-                np.clip(
-                    fracture_subset["displacement_jump"],
-                    a_min=DISPLACEMENT_JUMP_Y_MIN,
-                    a_max=None,
-                ),
+                fracture_subset["displacement_jump"],
                 color=color,
                 linewidth=2,
                 markersize=4,
                 label=f"Displacement Jump on {fracture_name}",
             )
             ax2.tick_params(axis="y")
-            ax2.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
 
         else:
             ax2.plot(
@@ -143,6 +142,8 @@ def plot_flow_rate_and_fracture_displacement(
                 markersize=4,
                 label=f"Displacement Jump on {fracture_name}",
             )
+            ax2.tick_params(axis="y")
+        ax2.set_ylim(bottom=JUMP_RANGE[0], top=JUMP_RANGE[1])
 
     if temperature_schedule is None:
         line1 = ax1.plot(
@@ -184,26 +185,28 @@ def plot_flow_rate_and_fracture_displacement(
         fluid_flux_handle = blue_line
         fluid_flux_label = "Fluid Flux in Production Well"
         lines2 = ax2.get_lines()
-        ax1.legend(
-            [fluid_flux_handle] + lines2,
-            [fluid_flux_label] + [l.get_label() for l in lines2],
-            loc="lower right",
-            fontsize=10,
-            framealpha=0.9,
-            edgecolor="black",
-            handler_map={tuple: HandlerTuple(ndivide=None)},
-        )
+        if not separate_legend:
+            ax1.legend(
+                [fluid_flux_handle] + lines2,
+                [fluid_flux_label] + [l.get_label() for l in lines2],
+                loc="lower right",
+                fontsize=10,
+                framealpha=0.9,
+                edgecolor="black",
+                handler_map={tuple: HandlerTuple(ndivide=None)},
+            )
     else:
         lines1 = line1
         lines2 = ax2.get_lines()
-        ax1.legend(
-            lines1 + lines2,
-            [l.get_label() for l in lines1 + lines2],
-            loc="lower right",
-            fontsize=10,
-            framealpha=0.9,
-            edgecolor="black",
-        )
+        if not separate_legend:
+            ax1.legend(
+                lines1 + lines2,
+                [l.get_label() for l in lines1 + lines2],
+                loc="upper left",
+                fontsize=10,
+                framealpha=0.9,
+                edgecolor="black",
+            )
     if title is None:
         title = "Production Well Fluid Flux and Fracture Displacement Jump"
     plt.title(
@@ -213,8 +216,34 @@ def plot_flow_rate_and_fracture_displacement(
     )
     fig.tight_layout()
     # Save the plot
-    output_path = csv_dir / "flow_rate_and_displacement_plot.png"
+    if out_path is not None:
+        output_path = Path(out_path)
+    else:
+        output_path = csv_dir / "flow_rate_and_displacement_plot.png"
+    if not output_path.parent.exists():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    # Create separate figure with legend only
+    if create_legend:
+        fig_legend = plt.figure(figsize=(7, 0.5))
+        ax_legend = fig_legend.add_subplot(111)
+        ax_legend.axis("off")
+        if temperature_schedule is not None:
+            handles = [fluid_flux_handle] + lines2
+            labels = [fluid_flux_label] + [l.get_label() for l in lines2]
+        else:
+            handles = lines1 + lines2
+            labels = [l.get_label() for l in lines1 + lines2]
+        ax_legend.legend(
+            handles,
+            labels,
+            loc="center",
+            fontsize=10,
+            framealpha=0.9,
+            edgecolor="black",
+        )
+        legend_out_path = output_path.parent / f"{output_path.stem}_legend.png"
+        fig_legend.savefig(legend_out_path, dpi=150, bbox_inches="tight")
     print(f"Plot saved to: {output_path}")
 
     return fig
@@ -224,6 +253,7 @@ def plot_fracture_displacement(
     csv_dir: Path | str,
     file_base: str,
     title=None,
+    semilogy=False,
 ) -> None:
     """
     Plot displacement jump of fractures over time (for simulations without wells).
@@ -258,7 +288,7 @@ def plot_fracture_displacement(
     fracture_names = fracture_data["fracture_id"].unique().tolist()
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(8, 4))
 
     # Set up colors for different fractures
     color_map = {
@@ -295,21 +325,16 @@ def plot_fracture_displacement(
         fracture_subset = fracture_subset[fracture_subset["time"].isin(accepted_times)]
 
         color = color_map.get(idx, f"C{idx}")
-        if DISPLACEMENT_JUMP_Y_MIN is not None:
+        if semilogy:
             ax.semilogy(
                 fracture_subset["time"],
-                np.clip(
-                    fracture_subset["displacement_jump"],
-                    a_min=DISPLACEMENT_JUMP_Y_MIN,
-                    a_max=None,
-                ),
+                fracture_subset["displacement_jump"],
                 color=color,
                 linewidth=2,
                 marker="o",
                 markersize=4,
                 label=f"{fracture_name}",
             )
-            ax.set_ylim(bottom=DISPLACEMENT_JUMP_Y_MIN)
 
         else:
             ax.plot(
@@ -321,6 +346,7 @@ def plot_fracture_displacement(
                 markersize=4,
                 label=f"{fracture_name}",
             )
+        ax.set_ylim(bottom=JUMP_RANGE[0], top=JUMP_RANGE[1])
 
     ax.set_xlabel("Time (s)", fontsize=12)
     ax.set_ylabel("Displacement Jump (m)", fontsize=12)
@@ -376,6 +402,8 @@ def summarize_slip_onset_times(
 
 
 class CosoExporter:
+    mdg: pp.MixedDimensionalGrid
+    nd: int
     evaluate_and_scale: Callable[
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
@@ -388,7 +416,7 @@ class CosoExporter:
                 if not name.startswith("Fracture"):
                     continue
                 jump = variables["displacement_jump"]
-                if jump > DISPLACEMENT_JUMP_Y_MIN:
+                if jump > JUMP_RANGE[0]:
                     if name not in sliding_onset_times:
                         sliding_onset_times[name] = time
         return sliding_onset_times
