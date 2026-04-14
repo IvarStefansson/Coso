@@ -309,41 +309,38 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         center_injection = np.array([x + dx, y_mid, z])
         # Create a single elliptic fracture
         self._fractures = [  # First the injection fracture
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center_injection,
-                strike_angle=0,
+                strike_angle=np.pi / 2,
                 dip_angle=np.pi / 2,
                 major_axis=self.fracture_major_axes[2],
                 minor_axis=self.fracture_minor_axes[2],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         ]
 
         center = np.array([x, y_mid + dy, z])
         # Production fracture, always connected.
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=-np.pi / 4,
+                strike_angle=np.pi / 4,
                 dip_angle=np.pi / 2,
                 major_axis=self.fracture_major_axes[0],
                 minor_axis=self.fracture_minor_axes[0],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
         center = np.array([x, y_mid - dy, z])
         # Production or passive fracture, connected for long well.
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=np.pi / 4,
+                strike_angle=-np.pi / 4,
                 dip_angle=np.pi / 2,
                 major_axis=self.fracture_major_axes[1],
                 minor_axis=self.fracture_minor_axes[1],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
 
