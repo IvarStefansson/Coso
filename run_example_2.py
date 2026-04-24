@@ -5,12 +5,14 @@ import numpy as np
 import porepy as pp
 from porepy.applications.test_utils.models import add_mixin
 
-from boundary_conditions import (CosoBoundaryConditionsDisplacement,
-                                 NeumannWellBCsFromSchedule)
+from boundary_conditions import (
+    CosoBoundaryConditionsDisplacement,
+    NeumannWellBCsFromSchedule,
+)
 from geometry import ConceptualGeometryTwoFractures
 from material_parameters import granodiorite_values
-from physical_model import (HeterogeneousPermeabilitySpecification,
-                            PhysicalModel)
+from physical_model import HeterogeneousPermeabilitySpecification, PhysicalModel
+from diff_tpfa import DarcysLawAdEverywhere
 
 try:
     import pp_solvers
@@ -24,11 +26,15 @@ import sys
 from datetime import datetime
 
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
-    BoundaryConditionsMechanicsNeumann, HydrostaticBoundaryPressureValues,
-    LithostaticBoundaryStressValues, ThermalGradientBoundaryTemperatureValues)
+    BoundaryConditionsMechanicsNeumann,
+    HydrostaticBoundaryPressureValues,
+    LithostaticBoundaryStressValues,
+    ThermalGradientBoundaryTemperatureValues,
+)
 from porepy.applications.initial_conditions.model_initial_conditions import (
     InitialConditionHydrostaticPressureValues,
-    InitialConditionThermalGradientTemperatureValues)
+    InitialConditionThermalGradientTemperatureValues,
+)
 from porepy.examples.geothermal_reservoir import WellBoundaryConditions
 from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 
@@ -130,6 +136,7 @@ def create_schedule(
     production_period: float,
     shut_in_duration: float = 3 * pp.DAY,
     final_time: float = 10 * pp.YEAR,
+    num_bins_per_interval: int | None = None,
 ) -> tuple[np.ndarray, Sequence[tuple[float, float]]]:
     """Create a time schedule for the simulation based on production period and time step.
 
@@ -142,6 +149,9 @@ def create_schedule(
         production_period: The total production period in years.
         shut_in_duration: The duration of shut-in periods in years (default is 2 days).
         final_time: The total simulation time in years (default is 4 years).
+        num_bins_per_interval: If given, bin boundaries for both production and shut-in
+            sub-intervals are inserted into the schedule so that simulation outputs
+            align exactly with bin edges used in post-processing plots.
 
     Returns:
         tuple: A tuple containing:
@@ -166,11 +176,29 @@ def create_schedule(
     # Add the initial time step at 0 to the schedule.
     schedule = np.insert(schedule, 0, 0.0)
 
+    if num_bins_per_interval is not None:
+        # Insert bin boundaries for each production and each shut-in sub-interval so
+        # that simulation checkpoints align exactly with the bin edges used for
+        # plotting slip rates and production rates.
+        bin_times = []
+        for i in np.arange(1, n + 1):
+            prod_start = (i - 1) * production_period
+            prod_end = i * production_period - shut_in_duration
+            bin_times.append(
+                np.linspace(prod_start, prod_end, num_bins_per_interval + 1)
+            )
+            shut_start = prod_end
+            shut_end = i * production_period
+            bin_times.append(
+                np.linspace(shut_start, shut_end, num_bins_per_interval + 1)
+            )
+        schedule = np.unique(np.concatenate([schedule] + bin_times))
+
     return schedule, neumann_intervals
 
 
 def names_from_params(velocity: float, period: float):
-    simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}_"
+    simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}"
     folder_name = "Case_II/" + simulation_name
     folder_name_init = folder_name + "_initialization"
     file_name = "example_2"
@@ -231,7 +259,7 @@ production_periods = [
 ]  # In years
 if __name__ == "__main__":
     tp = True
-    copy_plots = False
+    copy_plots = True
     if LOG_TO_FILE:
         print(f"Logging to file: {log_file}")
 
@@ -247,7 +275,9 @@ if __name__ == "__main__":
             cell_size = 8e2 * refinement
             cell_size_fracture = 0.6 * fracture_size * refinement
 
-            schedule, neumann_intervals = create_schedule(production_period)
+            schedule, neumann_intervals = create_schedule(
+                production_period, num_bins_per_interval=5
+            )
             time_manager, time_manager_init = time_managers(
                 schedule, dt, production_period
             )
