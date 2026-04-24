@@ -5,8 +5,9 @@
 # [2] Nicholas C. Davatzes1 and Stephen H. Hickman2 (2010): The Feedback Between Stress,
 # Faulting, and Fluid Flow
 import os
-import porepy as pp
+
 import pandas as pd
+import porepy as pp
 
 bulk_modulus_granodiorite = 2.69e10  # [1], Table 4
 youngs_modulus_granodiorite = 7.4e10  # [1], Table 4

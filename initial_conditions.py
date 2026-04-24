@@ -1,6 +1,7 @@
+from functools import partial
+
 import numpy as np
 import porepy as pp
-from functools import partial
 from scipy.interpolate import interp1d
 
 

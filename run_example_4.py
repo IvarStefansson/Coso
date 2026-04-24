@@ -1,51 +1,47 @@
+import re
 import shutil
 from typing import Sequence
-import re
 
-import porepy as pp
 import numpy as np
+import porepy as pp
+from porepy.applications.test_utils.models import add_mixin
+
+from boundary_conditions import (CosoBoundaryConditionsDisplacement,
+                                 NeumannWellBCsFromSchedule)
 from geometry import ConceptualGeometry
 from material_parameters import granodiorite_values
-
-from physical_model import PhysicalModel, HeterogeneousPermeabilitySpecification
-from boundary_conditions import (
-    CosoBoundaryConditionsDisplacement,
-    NeumannWellBCsFromSchedule,
-)
-from porepy.applications.test_utils.models import add_mixin
+from physical_model import (HeterogeneousPermeabilitySpecification,
+                            PhysicalModel)
 
 try:
     import pp_solvers
 except ImportError:
     pp_solvers = None
 
+import copy
+import logging
+import os
+import sys
+import warnings
+from datetime import datetime
+
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
-    BoundaryConditionsMechanicsNeumann,
-    HydrostaticBoundaryPressureValues,
-    LithostaticBoundaryStressValues,
-    ThermalGradientBoundaryTemperatureValues,
-)
+    BoundaryConditionsMechanicsNeumann, HydrostaticBoundaryPressureValues,
+    LithostaticBoundaryStressValues, ThermalGradientBoundaryTemperatureValues)
 from porepy.applications.initial_conditions.model_initial_conditions import (
     InitialConditionHydrostaticPressureValues,
-    InitialConditionThermalGradientTemperatureValues,
-)
+    InitialConditionThermalGradientTemperatureValues)
 from porepy.examples.geothermal_reservoir import WellBoundaryConditions
-from porepy.viz.data_saving_model_mixin import (
-    IterationExporting,
-    FractureDeformationExporting,
-    ResidualExporting,
-)
-from solution_strategy import SolutionStrategy
+from porepy.viz.data_saving_model_mixin import (FractureDeformationExporting,
+                                                IterationExporting,
+                                                ResidualExporting)
+
+from exporting import (CosoExporter, GeometryExporting,
+                       summarize_slip_onset_times)
 from initial_conditions import CopyInitialCondition
+from solution_strategy import SolutionStrategy
 from solver_configurations import linear_solver_params, solver_params
-from exporting import CosoExporter, GeometryExporting, summarize_slip_onset_times
 from wells import WellDataConceptual
-import logging
-import sys
-import copy
-import os
-from datetime import datetime
-import warnings
 
 # Suppress multiprocessing semaphore warnings (common when debugging)
 # warnings.filterwarnings("ignore", ".*semaphore.*resource_tracker.*")

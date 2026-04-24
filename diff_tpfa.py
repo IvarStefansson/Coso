@@ -1,5 +1,6 @@
+from typing import Any, Callable
+
 import porepy as pp
-from typing import Callable, Any
 
 
 class DarcysLawAdEverywhere(

@@ -1,19 +1,14 @@
 import os
+import sys
 
 import numpy as np
-from numpy.typing import NDArray
-import porepy as pp
 import pandas as pd
-from save_fracture_coords import (
-    easting_northing_offset_to_strike_angle_dip_angle,
-)
+import porepy as pp
+from porepy.applications.md_grids.model_geometries import TwoEllipticFractures3d
+
 from exporting import CosoExporter
-import sys
+from save_fracture_coords import easting_northing_offset_to_strike_angle_dip_angle
 from wells import WellDataConceptual, WellDataCoso
-from porepy.applications.md_grids.model_geometries import (
-    SubsurfaceCuboidDomain,
-    TwoEllipticFractures3d,
-)
 
 
 class CosoGeometry:

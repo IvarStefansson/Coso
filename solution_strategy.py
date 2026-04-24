@@ -1,12 +1,13 @@
 import logging
 import time
-import numpy as np
-import scipy.sparse as sps
 import warnings
-import porepy as pp
 from functools import partial
-from porepy.applications.discretizations.flux_discretization import FluxDiscretization
 
+import numpy as np
+import porepy as pp
+import scipy.sparse as sps
+from porepy.applications.discretizations.flux_discretization import \
+    FluxDiscretization
 
 logger = logging.getLogger(__name__)
 

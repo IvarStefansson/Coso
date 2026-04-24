@@ -1,13 +1,13 @@
 import logging
-from typing import Callable, Sequence
 from pathlib import Path
-from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.legend_handler import HandlerTuple
+from typing import Callable, Sequence
+
 import numpy as np
 import pandas as pd
 import porepy as pp
-
+from matplotlib import pyplot as plt
+from matplotlib.legend_handler import HandlerTuple
+from matplotlib.lines import Line2D
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

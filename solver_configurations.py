@@ -1,4 +1,5 @@
-from porepy.numerics.nonlinear.line_search import ConstraintLineSearchNonlinearSolver
+from porepy.numerics.nonlinear.line_search import \
+    ConstraintLineSearchNonlinearSolver
 
 linear_solver_params = {
     # Options for mechanics.

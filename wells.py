@@ -1,7 +1,8 @@
-import porepy as pp
+import sys
+
 import numpy as np
 import pandas as pd
-import sys
+import porepy as pp
 
 
 class _WellDataBase:

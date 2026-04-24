@@ -1,7 +1,6 @@
 import os
 import shutil
 
-
 if __name__ == "__main__":
 
     fracture_strike_angles =(

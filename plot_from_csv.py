@@ -1,17 +1,12 @@
-from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import porepy as pp
-from run_example_4 import (
-    boundary_velocities,
-    cases,
-    production_periods,
-    thermal_expansions,
-    names_from_params,
-    create_schedule,
-)
-from exporting import plot_flow_rate_and_fracture_displacement
+from matplotlib import pyplot as plt
 
+from exporting import plot_flow_rate_and_fracture_displacement
+from run_example_4 import (boundary_velocities, cases, create_schedule,
+                           names_from_params, production_periods,
+                           thermal_expansions)
 
 if __name__ == "__main__":
     create_legend = True  # Only needed once
