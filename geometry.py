@@ -304,7 +304,6 @@ class ConceptualGeometry(TwoEllipticFractures3d):
         dy = self.domain_sizes()[1] / 8
         z = -self.domain_sizes()[2] / 2
         x = self.domain_sizes()[0] / 8 * 3
-        num_points = 15
 
         center_injection = np.array([x + dx, y_mid, z])
         # Create a single elliptic fracture
@@ -340,6 +339,33 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 dip_angle=np.pi / 2,
                 major_axis=self.fracture_major_axes[1],
                 minor_axis=self.fracture_minor_axes[1],
+                major_axis_angle=0,
+            )
+        )
+
+
+class ConceptualGeometryTwoFractures(ConceptualGeometry):
+    def fracture_names(self) -> list[str]:
+        return ["Fracture 1", "Fracture 2"]
+
+    def set_fractures(self):
+        """Keep first fracture and create second fracture at same y location but different x location."""
+        # Call the parent class's set_fractures method
+        super().set_fractures()
+        # Remove the second and third fracture
+        self._fractures = self._fractures[:1]
+        y_mid = self.domain_sizes()[1] / 2
+        z = -self.domain_sizes()[2] / 2
+        x = self.domain_sizes()[0] / 8 * 3
+        center = np.array([x, y_mid, z])
+        # Production fracture, always connected.
+        self._fractures.append(
+            pp.EllipticFracture(
+                center=center,
+                strike_angle=np.pi / 4,
+                dip_angle=np.pi / 2,
+                major_axis=self.fracture_major_axes[0],
+                minor_axis=self.fracture_minor_axes[0],
                 major_axis_angle=0,
             )
         )
