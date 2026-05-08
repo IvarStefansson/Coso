@@ -234,12 +234,14 @@ def time_managers(schedule: np.ndarray, dt: float, production_period: float):
     time_manager = pp.TimeManager(
         schedule=schedule,
         dt_init=dt,
-        dt_min_max=(1e-2, max(dt, production_period / 5)),
+        dt_min_max=(1e-2, max(dt, production_period / 10)),
         iter_max=20,
         iter_optimal_range=(5, 12),
         iter_relax_factors=(0.6, 2.0),
-        recomp_factor=0.3,
+        recomp_factor=0.2,
         recomp_max=10,
+        rtol=1e-20,  # Low rtol due to large time values.
+        atol=1e-5,
     )
     dt_init = 5e9
     time_manager_init = pp.TimeManager(
