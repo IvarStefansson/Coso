@@ -605,15 +605,15 @@ class CosoExporter:
             (self.nd, -1), order="F"
         )
         slip_tendency = self.compute_slip_tendency(traction, friction_coefficient)
+        G = self.solid.shear_modulus
         for id, sd in enumerate(fracs):
             key = self.fracture_names()[sd.frac_num]
+            cell_vols = fracs[id].cell_volumes
+            cell_jump = jump_norm[cell_offsets[id] : cell_offsets[id + 1]]
+            total_slip_x_area = ConvergenceAnalysis.lp_norm(cell_jump, cell_vols, p=1)
             data[key] = {
-                "displacement_jump": ConvergenceAnalysis.lp_norm(
-                    jump_norm[cell_offsets[id] : cell_offsets[id + 1]],
-                    fracs[id].cell_volumes,
-                    p=1,
-                )
-                / np.sum(fracs[id].cell_volumes),
+                "displacement_jump": total_slip_x_area / np.sum(cell_vols),
+                "seismic_moment": G * total_slip_x_area,
             }
             data[key]["slip_tendency"] = np.nanmean(
                 slip_tendency[cell_offsets[id] : cell_offsets[id + 1]]
@@ -741,14 +741,8 @@ class CosoExporter:
                 )
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 plt.savefig(output_path)
-        if "example_4" in self.params["file_name"]:
-            start = 1
-        else:
-            start = (
-                1
-                if np.isclose(self.params["fracture_params"]["strike_angles"][0], 0)
-                else 0
-            )
+        start = 1
+
         well_ind = 1 if "example_8" in self.params["file_name"] else 0
         plot_flow_rate_and_fracture_displacement(
             csv_dir=Path(self.params["data_folder_name"]) / "well_monitoring",
