@@ -366,6 +366,34 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
         )
 
 
+class SubmergedDomain:
+    def depth(self, coords: np.ndarray) -> np.ndarray:
+        """Depth from the surface.
+
+        Parameters:
+            coords: Coordinates.
+        Returns:
+            Array with depth values.
+
+        """
+        top_surface = self.params.get("top_surface", -1.1e3)
+        return top_surface - coords[2]
+
+    def set_domain(self) -> None:
+        """Set the cubic domain."""
+        x_size, y_size, z_size = self.domain_sizes()
+        top_surface = self.depth(np.zeros((3, 1)))
+        box = {
+            "xmin": 0.0,
+            "xmax": x_size,
+            "ymin": 0.0,
+            "ymax": y_size,
+            "zmin": top_surface - z_size,
+            "zmax": top_surface,
+        }
+        self._domain = pp.Domain(box)
+
+
 class LargeGeometry(TwoEllipticFractures3d):
     def set_well_network(self) -> None:
         """Assign well network class."""
