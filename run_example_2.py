@@ -23,6 +23,7 @@ import copy
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
@@ -197,12 +198,14 @@ def create_schedule(
     return schedule, neumann_intervals
 
 
-def names_from_params(velocity: float, period: float):
-    simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}"
+def names_from_params(velocity: float, period: float, with_production: bool):
+    prod_suffix = "" if with_production else "_no_production"
+    simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}{prod_suffix}"
     folder_name = "Case_II/" + simulation_name
     folder_name_init = folder_name + "_initialization"
     file_name = "example_2"
-    title = f", Boundary velocity = {velocity:.1e} m/y, "
+    prod_label = "" if with_production else ", no injection"
+    title = f", Strain rate = {velocity:.1e} m/y{prod_label}, "
     title = title[0].upper() + title[1:]
     return simulation_name, folder_name, folder_name_init, file_name, title
 
@@ -230,15 +233,17 @@ def time_managers(schedule: np.ndarray, dt: float, production_period: float):
     return time_manager, time_manager_init
 
 
-def log_summary(velocity: float, period: float):
+def log_summary(velocity: float, period: float, with_production: bool):
     # Log run configuration
     logger.info("=" * 80)
     logger.info("Starting new simulation with configuration:")
     logger.info(f"  Boundary velocity: {velocity:.2e} m/year")
     logger.info(f"  Production period: {period} years")
+    logger.info(f"  With production: {with_production}")
     logger.info("=" * 80)
 
 
+NUM_BINS_PER_INTERVAL = 4
 use_iterative_solver = False
 if use_iterative_solver and "pp_solvers" not in sys.modules:
     raise ImportError(
@@ -252,7 +257,10 @@ boundary_velocities = [
     2.0e-6,
     # 5.0e-6,
 ]
-
+with_production = [
+    True,
+    False,
+]
 production_periods = [
     # 0.5,
     1.0,
@@ -385,30 +393,31 @@ if __name__ == "__main__":
             )
             logger.info("=" * 80)
 
-            solid_values_local["friction_coefficient"] = friction_coeff
-            model_params.update(
-                {
-                    "time_manager": time_manager,
-                    "file_name": file_name,
-                    "folder_name": folder_name,
-                    "initialization": False,
-                    "use_wells": True,
-                    "reference_from_initial": True,
-                    "material_constants": {
-                        "solid": pp.SolidConstants(**solid_values_local),
-                        "fluid": pp.FluidComponent(**pp.fluid_values.water),
-                    },
-                    "neumann_intervals": neumann_intervals,
-                    "production_well_y_endpoint": 1e3,
-                }
-            )
-            model_class = MainModel
-            if use_iterative_solver:
-                model_class = add_mixin(pp_solvers.IterativeSolverMixin, MainModel)
-                model_params["linear_solver"] = {
-                    "preconditioner_factory": pp_solvers.thm_factory
-                }
-                model_params["linear_solver"]["options"] = linear_solver_params
+                solid_values_local["friction_coefficient"] = friction_coeff
+                model_params.update(
+                    {
+                        "time_manager": time_manager,
+                        "file_name": file_name,
+                        "folder_name": folder_name,
+                        "initialization": False,
+                        "use_wells": with_prod,
+                        "reference_from_initial": True,
+                        "material_constants": {
+                            "solid": pp.SolidConstants(**solid_values_local),
+                            "fluid": pp.FluidComponent(**pp.fluid_values.water),
+                        },
+                        "neumann_intervals": neumann_intervals,
+                        "well_transition_duration": 1 * pp.HOUR,
+                        "production_well_y_endpoint": 1e3,
+                    }
+                )
+                model_class = MainModel
+                if use_iterative_solver:
+                    model_class = add_mixin(pp_solvers.IterativeSolverMixin, MainModel)
+                    model_params["linear_solver"] = {
+                        "preconditioner_factory": pp_solvers.thm_factory
+                    }
+                    model_params["linear_solver"]["options"] = linear_solver_params
 
             model = model_class(model_params)  # Load from initialization from file
             model.initialization_model = init_model
