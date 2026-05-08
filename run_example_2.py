@@ -292,126 +292,135 @@ if __name__ == "__main__":
         print(f"Logging to file: {log_file}")
 
     slip_onset_times = {}
-    for velocity in boundary_velocities:
-        for period in production_periods:
-            # Define the time parameters
-            dt = 1e2
-            production_period = period * pp.YEAR
-            domain_size = 4.0e3
-            fracture_size = 5e2
-            refinement = 0.3 if use_iterative_solver else 1.0
-            cell_size = 8e2 * refinement
-            cell_size_fracture = 0.6 * fracture_size * refinement
+    simulation_summaries = []
+    for with_prod in with_production:
+        for velocity in boundary_velocities:
+            for period in production_periods:
+                # Define the time parameters
+                dt = 1e2
+                production_period = period * pp.YEAR
+                domain_size = 4.0e3
+                fracture_size = 5e2
+                refinement = 0.5 if use_iterative_solver else 0.80
+                cell_size = 10e2 * refinement
+                cell_size_fracture = 0.6 * fracture_size * refinement
 
-            schedule, neumann_intervals = create_schedule(
-                production_period, num_bins_per_interval=5
-            )
-            time_manager, time_manager_init = time_managers(
-                schedule, dt, production_period
-            )
-            solid_values_local = copy.deepcopy(granodiorite_values)
-            solid_values_init = copy.deepcopy(solid_values_local)
-            simulation_name, folder_name, folder_name_init, file_name, title = (
-                names_from_params(velocity, period)
-            )
-            if copy_plots:
-                # Copy the plots from previous runs to the new folder for comparison.
-                dest_folder = "figures/Case_II/"
-                source = (
-                    folder_name
-                    + "_saved_data/well_monitoring/flow_rate_and_displacement_plot.png"
+                schedule, neumann_intervals = create_schedule(
+                    production_period, num_bins_per_interval=NUM_BINS_PER_INTERVAL
                 )
-                os.makedirs(dest_folder, exist_ok=True)
-                dest = os.path.join(dest_folder, f"{simulation_name}_flow_and_disp.png")
-                if os.path.exists(source):
-                    shutil.copyfile(source, dest)
-                    logger.info(f"Copied plot from {source} to {dest}")
+                time_manager, time_manager_init = time_managers(
+                    schedule, dt, production_period
+                )
+                solid_values_local = copy.deepcopy(granodiorite_values)
+                solid_values_init = copy.deepcopy(solid_values_local)
+                simulation_name, folder_name, folder_name_init, file_name, title = (
+                    names_from_params(velocity, period, with_prod)
+                )
+                if copy_plots:
+                    # Copy the plots from previous runs to the new folder for comparison.
+                    dest_folder = "figures/Case_II/"
+                    source = (
+                        folder_name
+                        + "_saved_data/well_monitoring/flow_rate_and_displacement_plot.png"
+                    )
+                    os.makedirs(dest_folder, exist_ok=True)
+                    dest = os.path.join(
+                        dest_folder, f"{simulation_name}_flow_and_disp.png"
+                    )
+                    if os.path.exists(source):
+                        shutil.copyfile(source, dest)
+                        logger.info(f"Copied plot from {source} to {dest}")
 
-                continue
-            log_summary(velocity, period)
-            model_params_init = {
-                "plot_title": title,
-                "domain_sizes": np.full(3, domain_size),
-                "material_constants": {
-                    "solid": pp.SolidConstants(**solid_values_init),
-                    "fluid": pp.FluidComponent(**pp.fluid_values.water),
-                },
-                "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
-                "time_manager": time_manager_init,
-                "grid_type": "simplex",
-                "meshing_arguments": {
-                    "cell_size": cell_size,
-                    "cell_size_fracture": cell_size_fracture,
-                },
-                "file_name": file_name,
-                "data_folder_name": f"{folder_name}_saved_data",
-                "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
-                "use_wells": False,
-                "reference_variable_values": pp.ReferenceVariableValues(
-                    temperature=pp.Celsius_to_Kelvin(50)
-                ),
-                "thermal_gradient": 7e-2,
-                "fracture_file": "coords.txt",
-                "folder_name": folder_name_init,
-                "initialization": True,
-                "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
-                "fracture_params": {  # Other options are available in the geometry mixin.
-                    "fracture_major_axes": np.array(
-                        (
-                            fracture_size / domain_size,
-                            fracture_size / domain_size,
-                            fracture_size / domain_size,
-                        )
+                    continue
+                log_summary(velocity, period, with_prod)
+                model_params_init = {
+                    "plot_title": title,
+                    "domain_sizes": np.full(3, domain_size),
+                    "material_constants": {
+                        "solid": pp.SolidConstants(**solid_values_init),
+                        "fluid": pp.FluidComponent(**pp.fluid_values.water),
+                    },
+                    "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
+                    "time_manager": time_manager_init,
+                    "grid_type": "simplex",
+                    "meshing_arguments": {
+                        "cell_size": cell_size,
+                        "cell_size_fracture": cell_size_fracture,
+                    },
+                    "file_name": file_name,
+                    "data_folder_name": f"{folder_name}_saved_data",
+                    "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
+                    "use_wells": False,
+                    "reference_variable_values": pp.ReferenceVariableValues(
+                        temperature=pp.Celsius_to_Kelvin(50)
                     ),
-                },
-                "heterogeneous_permeability": True,
-                "darcy_flux_discretization": "tpfa" if tp else "mpfa",
-                "fourier_flux_discretization": "tpfa" if tp else "mpfa",
-                "use_ic_interpolation": True,
-                "boundary_displacement_velocity": velocity / pp.YEAR,
-            }
-            model_params = copy.deepcopy(model_params_init)
-            injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
-            production_p = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
-            injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(10))
-            production_t = np.full(schedule.shape, 373.15)
-            # Can be refined to have different schedules for each well.
-            for name in MainModel.injection_well_names.fget(None):
-                model_params[f"{name}_pressures"] = injection_p
-                model_params[f"{name}_temperatures"] = injection_t
-            for name in MainModel.production_well_names.fget(None):
-                model_params[f"{name}_pressures"] = production_p
-                model_params[f"{name}_temperatures"] = production_t
-
-            initialization_class = InitializationModel
-            if use_iterative_solver:
-                initialization_class = add_mixin(
-                    pp_solvers.IterativeSolverMixin, InitializationModel
-                )
-                model_params_init["linear_solver"] = {
-                    "preconditioner_factory": pp_solvers.thm_factory
+                    "thermal_gradient": 7e-2,
+                    "fracture_file": "coords.txt",
+                    "folder_name": folder_name_init,
+                    "initialization": True,
+                    "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
+                    "fracture_params": {  # Other options are available in the geometry mixin.
+                        "fracture_major_axes": np.array(
+                            (
+                                fracture_size / domain_size,
+                                fracture_size / domain_size,
+                                fracture_size / domain_size,
+                            )
+                        ),
+                    },
+                    "heterogeneous_permeability": True,
+                    "darcy_flux_discretization": "tpfa" if tp else "mpfa",
+                    "fourier_flux_discretization": "tpfa" if tp else "mpfa",
+                    "use_ic_interpolation": True,
+                    "boundary_displacement_velocity": velocity / pp.YEAR,
                 }
+                model_params = copy.deepcopy(model_params_init)
+                if with_prod:
+                    injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
+                    production_p = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
+                    injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(10))
+                    production_t = np.full(schedule.shape, 373.15)
+                    # Can be refined to have different schedules for each well.
+                    for name in MainModel.injection_well_names.fget(None):
+                        model_params[f"{name}_pressures"] = injection_p
+                        model_params[f"{name}_temperatures"] = injection_t
+                    for name in MainModel.production_well_names.fget(None):
+                        model_params[f"{name}_pressures"] = production_p
+                        model_params[f"{name}_temperatures"] = production_t
 
-                model_params_init["linear_solver"]["options"] = linear_solver_params
+                initialization_class = InitializationModel
+                if use_iterative_solver:
+                    initialization_class = add_mixin(
+                        pp_solvers.IterativeSolverMixin, InitializationModel
+                    )
+                    model_params_init["linear_solver"] = {
+                        "preconditioner_factory": pp_solvers.thm_factory
+                    }
 
-            init_model = initialization_class(model_params_init)
+                    model_params_init["linear_solver"]["options"] = linear_solver_params
 
-            pp.run_time_dependent_model(init_model, solver_params)
-            # Analyze the initialization results to set friction coefficient
-            sds = init_model.mdg.subdomains(dim=2)
-            traction = init_model.evaluate_and_scale(
-                sds, "contact_traction", "-"
-            ).reshape((3, -1), order="F")
-            friction_coeff = (
-                np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :]))
-                + 0.001
-            )
-            logger.info("=" * 80)
-            logger.info(
-                "Determined friction coefficient from initialization: "
-                + f"{friction_coeff:.4f}"
-            )
-            logger.info("=" * 80)
+                init_model = initialization_class(model_params_init)
+
+                t0_init = time.perf_counter()
+                pp.run_time_dependent_model(init_model, solver_params)
+                t1_init = time.perf_counter()
+                # Analyze the initialization results to set friction coefficient
+                sds = init_model.mdg.subdomains(dim=2)
+                traction = init_model.evaluate_and_scale(
+                    sds, "contact_traction", "-"
+                ).reshape((3, -1), order="F")
+                friction_coeff = (
+                    np.max(
+                        np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])
+                    )
+                    + 0.001
+                )
+                logger.info("=" * 80)
+                logger.info(
+                    "Determined friction coefficient from initialization: "
+                    + f"{friction_coeff:.4f}"
+                )
+                logger.info("=" * 80)
 
                 solid_values_local["friction_coefficient"] = friction_coeff
                 model_params.update(
@@ -439,13 +448,46 @@ if __name__ == "__main__":
                     }
                     model_params["linear_solver"]["options"] = linear_solver_params
 
-            model = model_class(model_params)  # Load from initialization from file
-            model.initialization_model = init_model
-            solver_params.update(
-                {
-                    "local_line_search": 1,
-                    "global_line_search": 1,
-                }
-            )
-            pp.run_time_dependent_model(model, solver_params)
-            slip_onset_times[simulation_name] = model.slip_onset_times()
+                model = model_class(model_params)  # Load from initialization from file
+                model.initialization_model = init_model
+                solver_params.update(
+                    {
+                        "local_line_search": 1,
+                        "global_line_search": 1,
+                    }
+                )
+                t0_main = time.perf_counter()
+                pp.run_time_dependent_model(model, solver_params)
+                t1_main = time.perf_counter()
+                slip_onset_times[simulation_name] = model.slip_onset_times()
+                simulation_summaries.append(
+                    {
+                        "name": simulation_name,
+                        "init_steps": init_model.time_manager.time_index,
+                        "init_wall_time": t1_init - t0_init,
+                        "main_steps": model.time_manager.time_index,
+                        "main_wall_time": t1_main - t0_main,
+                    }
+                )
+                model.save_results()
+
+    print("\n" + "=" * 80)
+    print("SIMULATION SUMMARY")
+    print("=" * 80)
+    for s in simulation_summaries:
+        total_steps = s["init_steps"] + s["main_steps"]
+        total_time = s["init_wall_time"] + s["main_wall_time"]
+        print(f"\nSimulation: {s['name']}")
+        print(
+            f"  Initialization : {s['init_steps']:4d} time steps, "
+            f"{s['init_wall_time']:8.1f} s ({s['init_wall_time'] / 60:.1f} min)"
+        )
+        print(
+            f"  Main run       : {s['main_steps']:4d} time steps, "
+            f"{s['main_wall_time']:8.1f} s ({s['main_wall_time'] / 60:.1f} min)"
+        )
+        print(
+            f"  Total          : {total_steps:4d} time steps, "
+            f"{total_time:8.1f} s ({total_time / 60:.1f} min)"
+        )
+    print("=" * 80)
