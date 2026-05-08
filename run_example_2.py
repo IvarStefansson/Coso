@@ -139,60 +139,80 @@ def create_schedule(
     final_time: float = 10 * pp.YEAR,
     num_bins_per_interval: int | None = None,
 ) -> tuple[np.ndarray, Sequence[tuple[float, float]]]:
-    """Create a time schedule for the simulation based on production period and time step.
+    """Build a simulation time schedule with alternating production and shut-in periods.
 
-    Generates a time schedule that includes both the production period and additional
-    time steps to ensure proper resolution of the simulation. The schedule starts at 0,
-    includes the production period, and extends beyond it with additional steps
-    determined by the time step.
+    Each cycle consists of a production sub-interval of length
+    ``production_period - shut_in_duration`` followed by a shut-in sub-interval of
+    length ``shut_in_duration``.  The schedule always starts at t=0 and ends at the
+    last cycle boundary that is needed to cover ``final_time``.
+
+    Shut-in periods correspond to intervals where Neumann (zero-flux) well boundary
+    conditions are applied instead of prescribed pressures.  The returned
+    ``neumann_intervals`` list marks exactly these shut-in windows so the boundary
+    condition mixin can switch behaviour.
+
+    If ``num_bins_per_interval`` is given, equally-spaced bin-boundary times are
+    inserted into the schedule for *both* the production and shut-in sub-intervals of
+    every cycle.  This ensures that the time integrator always outputs a state at each
+    bin edge, so that post-processing (slip-rate / flux binning) can read off values
+    at exactly the right times without interpolation.
 
     Parameters:
-        production_period: The total production period in years.
-        shut_in_duration: The duration of shut-in periods in years (default is 2 days).
-        final_time: The total simulation time in years (default is 4 years).
-        num_bins_per_interval: If given, bin boundaries for both production and shut-in
-            sub-intervals are inserted into the schedule so that simulation outputs
-            align exactly with bin edges used in post-processing plots.
+        production_period: Duration of one full cycle (production + shut-in) in seconds.
+        shut_in_duration: Duration of the shut-in portion at the end of each cycle in
+            seconds (default: 3 days).
+        final_time: Total simulation end time in seconds (default: 10 years).  The
+            number of cycles is rounded up so the schedule covers at least this long.
+        num_bins_per_interval: Number of equal bins per sub-interval (production *and*
+            shut-in).  When given, ``num_bins_per_interval + 1`` evenly-spaced
+            boundary times are added to the schedule for each sub-interval.
 
     Returns:
         tuple: A tuple containing:
-            - schedule (np.ndarray): An array of time points for the simulation.
-            - neumann_intervals (list of tuples): A list of time intervals where Neumann
-              boundary conditions are applied.
+            - schedule (np.ndarray): Sorted array of time checkpoints (seconds),
+              starting at 0 and ending at the last cycle boundary.
+            - neumann_intervals (list[tuple[float, float]]): One ``(start, end)``
+              tuple per shut-in period, used to activate zero-flux well BCs.
     """
-    # Calculate the number of production periods needed to cover the final time
+    # Number of complete cycles required to reach final_time.
     n = int(np.ceil(final_time / production_period))
-    # Create a schedule with production periods and shut-in durations.
+
+    # For each cycle i (1-indexed), add the shut-in start (= production end) and the
+    # cycle end.  These are the mandatory checkpoint times that delimit each sub-
+    # interval boundary.  t=0 is prepended separately below.
     schedule = np.hstack(
         [
             [i * production_period - shut_in_duration, i * production_period]
             for i in np.arange(1, n + 1)
         ]
     )
-    # Create a list of Neumann intervals corresponding to the shut-in periods.
+
+    # Record each shut-in window as a Neumann interval: from shut-in start to cycle end.
     neumann_intervals = [
         (i * production_period - shut_in_duration, i * production_period)
         for i in np.arange(1, n + 1)
     ]
-    # Add the initial time step at 0 to the schedule.
+
+    # Prepend t=0 so the time manager starts from the initial condition.
     schedule = np.insert(schedule, 0, 0.0)
 
     if num_bins_per_interval is not None:
-        # Insert bin boundaries for each production and each shut-in sub-interval so
-        # that simulation checkpoints align exactly with the bin edges used for
-        # plotting slip rates and production rates.
         bin_times = []
         for i in np.arange(1, n + 1):
+            # Production sub-interval: from the end of the previous cycle to the
+            # start of this cycle's shut-in.
             prod_start = (i - 1) * production_period
             prod_end = i * production_period - shut_in_duration
             bin_times.append(
                 np.linspace(prod_start, prod_end, num_bins_per_interval + 1)
             )
+            # Shut-in sub-interval: from shut-in start to cycle end.
             shut_start = prod_end
             shut_end = i * production_period
             bin_times.append(
                 np.linspace(shut_start, shut_end, num_bins_per_interval + 1)
             )
+        # Merge bin boundaries with the existing mandatory checkpoints and deduplicate.
         schedule = np.unique(np.concatenate([schedule] + bin_times))
 
     return schedule, neumann_intervals
