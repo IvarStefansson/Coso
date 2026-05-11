@@ -473,3 +473,172 @@ class OnlyInjectionWellNeumannBCsFromSchedule(NeumannWellBCsFromSchedule):
                 protocols[well_tag][variable] = values
 
         return protocols
+
+
+class SmoothWellTransitions(NeumannWellBCsFromSchedule):
+    """Smooth Neumann↔Dirichlet transitions at production well boundaries.
+
+    At production-start (Neumann → Dirichlet): the BC type remains Dirichlet
+    (as it would be outside the shut-in window), but the prescribed pressure is
+    linearly ramped from the last recorded reservoir pressure at the well top
+    face toward the scheduled well-head pressure over ``well_transition_duration``
+    seconds.
+
+    At shut-in start (Dirichlet → Neumann): the BC type remains Neumann (as
+    returned by :class:`NeumannWellBCsFromSchedule`), but the prescribed Darcy
+    flux is linearly ramped from the last recorded converged value toward zero
+    over ``well_transition_duration`` seconds.
+
+    Set ``"well_transition_duration"`` (float, seconds) in the model params to
+    activate smoothing.  If absent or zero no smoothing is applied and the class
+    behaves identically to :class:`NeumannWellBCsFromSchedule`.
+    """
+
+    def _transition_duration(self) -> float:
+        dt = float(self.params.get("well_transition_duration", 0.0))
+        neumann_intervals = self.params.get("neumann_intervals", [])
+        if dt > 0.0 and neumann_intervals:
+            # Each Neumann interval is (shut_in_start, shut_in_start + shut_in_duration
+            # - transition_duration).  Recover the original shut_in_duration from the
+            # first interval and verify the transition fits within it.
+            start, end = neumann_intervals[0]
+            shut_in_duration = end - start + dt  # end = start + d_shutin - dt
+            if dt > shut_in_duration:
+                raise ValueError(
+                    f"well_transition_duration ({dt:.3g} s) exceeds the shut-in "
+                    f"duration ({shut_in_duration:.3g} s). The two ramp windows "
+                    "would overlap."
+                )
+        return dt
+
+    def _transition_progress(self, start_times: list[float]) -> float | None:
+        """Return linear progress ∈ (0, 1] if the current time is inside a
+        transition window starting at one of ``start_times``, else ``None``."""
+        dt = self._transition_duration()
+        if dt <= 0.0:
+            return None
+        t = self.time_manager.time
+        for t0 in start_times:
+            if t0 < t <= t0 + dt:
+                return (t - t0) / dt
+        return None
+
+    def _shutin_start_times(self) -> list[float]:
+        """Start time of each shut-in interval (Dirichlet → Neumann transition)."""
+        return [s for s, _ in self.params.get("neumann_intervals", [])]
+
+    def _production_start_times(self) -> list[float]:
+        """Start of each production ramp window (Neumann → Dirichlet transition).
+
+        These are the *end* times of the Neumann intervals stored in params, which
+        are ``well_transition_duration`` seconds *before* the true shut-in end (cycle
+        boundary).  The ramp window therefore spans
+        ``(neumann_end, neumann_end + well_transition_duration]``, i.e. the closing
+        ``well_transition_duration`` seconds of each shut-in period.
+
+        The very first production period (t = 0) is deliberately excluded because
+        that transition is handled by the initialization model.
+        """
+        return [e for _, e in self.params.get("neumann_intervals", [])]
+
+    def _top_face_index(self, sd: pp.Grid) -> int | None:
+        """Index of the top boundary face on a well grid, or ``None``."""
+        domain_sides = self.domain_boundary_sides(sd)
+        top_faces = domain_sides.top if self.nd == 3 else domain_sides.north
+        idxs = np.where(top_faces)[0]
+        return int(idxs[0]) if len(idxs) > 0 else None
+
+    def after_nonlinear_convergence(self) -> None:
+        """Cache Darcy flux and pressure at production well top faces.
+
+        Called after each converged time step.  The cached values are used as
+        the starting point for the ramps at the next transition boundary.
+        """
+        super().after_nonlinear_convergence()
+        if self._transition_duration() <= 0.0:
+            return
+        if not hasattr(self, "_cached_well_top_flux"):
+            self._cached_well_top_flux: dict[str, float] = {}
+            self._cached_well_top_pressure: dict[str, float] = {}
+        for sd in self.mdg.subdomains(dim=1):
+            if not (
+                self.is_well_grid(sd) and self.is_production_well(self.parent_well(sd))
+            ):
+                continue
+            face_idx = self._top_face_index(sd)
+            if face_idx is None:
+                continue
+            well_name = self.parent_well(sd).tags["well_name"]
+            # Darcy flux at top face.
+            flux_vals = self.darcy_flux([sd]).value(self.equation_system)
+            # When setting BC values, the sign of the flux is with respect to the
+            # outward normal of the boundary. However, the flux values returned by the
+            # equation system are with respect to the normal of the face. Flip sign if
+            # actual normal is opposite to outward normal.
+            out_normal = (
+                np.array([0.0, 0.0, 1.0]) if self.nd == 3 else np.array([0.0, 1.0])
+            )
+            outwards_normal_sign = sd.face_normals[:, face_idx] @ out_normal
+            self._cached_well_top_flux[well_name] = float(
+                flux_vals[face_idx] * outwards_normal_sign
+            )
+            # Pressure at top face (shallowest cell).
+            p_vals = self.pressure_trace([sd]).value(self.equation_system)
+            self._cached_well_top_pressure[well_name] = float(p_vals[face_idx])
+
+    def bc_values_pressure(self, bg: pp.BoundaryGrid) -> np.ndarray:
+        """Ramp well-head pressure from reservoir pressure at production-start.
+
+        Outside the opening transition window the values are identical to the
+        parent implementation (scheduled well-head pressure).
+        """
+        vals = super().bc_values_pressure(bg)  # type: ignore[misc]
+        sd = bg.parent
+        if not (
+            self.is_well_grid(sd) and self.is_production_well(self.parent_well(sd))
+        ):
+            return vals
+        alpha = self._transition_progress(self._production_start_times())
+        if alpha is None:
+            return vals
+        domain_sides = self.domain_boundary_sides(bg)
+        top_inds = domain_sides.top if self.nd == 3 else domain_sides.north
+        if not np.any(top_inds):
+            return vals
+        top_idx = int(np.where(top_inds)[0][0])
+        well_name = self.parent_well(sd).tags["well_name"]
+        # Use cached reservoir pressure; fall back to hydrostatic if unavailable
+        # (e.g., at the very first production-start after a shut-in with no prior
+        # converged production step).
+        p_reservoir = getattr(self, "_cached_well_top_pressure", {}).get(
+            well_name,
+            float(self.hydrostatic_pressure(self.depth(bg.cell_centers))[top_idx]),
+        )
+        p_target = float(vals[top_idx])
+        vals[top_inds] = (1.0 - alpha) * p_reservoir + alpha * p_target
+        return vals
+
+    def bc_values_darcy_flux(self, bg: pp.BoundaryGrid) -> np.ndarray:
+        """Ramp Darcy flux to zero during the shut-in closing transition.
+
+        Outside the closing transition window the values are identical to the
+        parent implementation (zero flux during shut-in).
+        """
+        vals = super().bc_values_darcy_flux(bg)  # type: ignore[misc]
+        sd = bg.parent
+        if not (
+            self.is_well_grid(sd) and self.is_production_well(self.parent_well(sd))
+        ):
+            return vals
+        alpha = self._transition_progress(self._shutin_start_times())
+        if alpha is None:
+            return vals
+        domain_sides = self.domain_boundary_sides(bg)
+        top_inds = domain_sides.top if self.nd == 3 else domain_sides.north
+        if not np.any(top_inds):
+            return vals
+        well_name = self.parent_well(sd).tags["well_name"]
+        q_last = getattr(self, "_cached_well_top_flux", {}).get(well_name, 0.0)
+        # alpha: 0 at transition start → 1 at end; ramp q_last → 0.
+        vals[top_inds] = (1.0 - alpha) * q_last
+        return vals

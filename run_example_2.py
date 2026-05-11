@@ -8,6 +8,7 @@ from porepy.applications.test_utils.models import add_mixin
 from boundary_conditions import (
     CosoBoundaryConditionsDisplacement,
     NeumannWellBCsFromSchedule,
+    SmoothWellTransitions,
 )
 from geometry import ConceptualGeometryTwoFractures
 from material_parameters import granodiorite_values
@@ -47,7 +48,7 @@ from wells import WellDataConceptual
 
 LOG_TO_FILE = False
 log_dir = "example_2_logs"
-
+FINAL_TIME = 1 * pp.YEAR
 
 if LOG_TO_FILE:
     # Create log directory if it doesn't exist
@@ -124,6 +125,7 @@ class InitializationModel(
 
 
 class MainModel(
+    SmoothWellTransitions,
     NeumannWellBCsFromSchedule,
     CopyInitialCondition,
     WellBoundaryConditions,
@@ -138,6 +140,7 @@ def create_schedule(
     shut_in_duration: float = 3 * pp.DAY,
     final_time: float = 10 * pp.YEAR,
     num_bins_per_interval: int | None = None,
+    transition_duration: float = 0.0,
 ) -> tuple[np.ndarray, Sequence[tuple[float, float]]]:
     """Build a simulation time schedule with alternating production and shut-in periods.
 
@@ -174,22 +177,43 @@ def create_schedule(
             - neumann_intervals (list[tuple[float, float]]): One ``(start, end)``
               tuple per shut-in period, used to activate zero-flux well BCs.
     """
+    if transition_duration > shut_in_duration:
+        raise ValueError(
+            f"transition_duration ({transition_duration:.3g} s) must not exceed "
+            f"shut_in_duration ({shut_in_duration:.3g} s). The shut-in ramp and the "
+            "production ramp would otherwise overlap."
+        )
+
     # Number of complete cycles required to reach final_time.
     n = int(np.ceil(final_time / production_period))
 
     # For each cycle i (1-indexed), add the shut-in start (= production end) and the
     # cycle end.  These are the mandatory checkpoint times that delimit each sub-
     # interval boundary.  t=0 is prepended separately below.
-    schedule = np.hstack(
-        [
-            [i * production_period - shut_in_duration, i * production_period]
-            for i in np.arange(1, n + 1)
-        ]
-    )
+    # If a transition duration is set, also insert the Neumann interval end
+    # (= cycle end − transition_duration) so the Neumann→Dirichlet switch always
+    # starts at an exact schedule boundary.
+    checkpoints = []
+    for i in np.arange(1, n + 1):
+        checkpoints.append(i * production_period - shut_in_duration)
+        if transition_duration > 0.0:
+            checkpoints.append(i * production_period - transition_duration)
+        checkpoints.append(i * production_period)
+    schedule = np.array(checkpoints)
 
-    # Record each shut-in window as a Neumann interval: from shut-in start to cycle end.
+    # Each Neumann interval covers the pure zero-flux part of the shut-in window:
+    #   start = shut-in start  (= i*T - d_shutin)
+    #   end   = transition start (= i*T - d_trans)
+    # The final ``transition_duration`` seconds of each shut-in period are NOT included
+    # in the Neumann interval; they form the production ramp window during which the BC
+    # type is already Dirichlet but the well-head pressure is ramped from the last
+    # reservoir pressure toward the scheduled target.  When transition_duration == 0,
+    # end == i*T and the full shut-in window is Neumann (legacy behaviour).
     neumann_intervals = [
-        (i * production_period - shut_in_duration, i * production_period)
+        (
+            i * production_period - shut_in_duration,
+            i * production_period - transition_duration,
+        )
         for i in np.arange(1, n + 1)
     ]
 
@@ -287,6 +311,7 @@ production_periods = [
     # 0.5,
     1.0,
 ]  # In years
+transition_duration = 2 * pp.HOUR
 if __name__ == "__main__":
     tp = True
     copy_plots = True
@@ -308,7 +333,10 @@ if __name__ == "__main__":
                 cell_size_fracture = 0.6 * fracture_size * refinement
 
                 schedule, neumann_intervals = create_schedule(
-                    production_period, num_bins_per_interval=NUM_BINS_PER_INTERVAL
+                    production_period,
+                    final_time=FINAL_TIME,
+                    num_bins_per_interval=NUM_BINS_PER_INTERVAL,
+                    transition_duration=transition_duration,
                 )
                 time_manager, time_manager_init = time_managers(
                     schedule, dt, production_period
@@ -438,7 +466,7 @@ if __name__ == "__main__":
                             "fluid": pp.FluidComponent(**pp.fluid_values.water),
                         },
                         "neumann_intervals": neumann_intervals,
-                        "well_transition_duration": 1 * pp.HOUR,
+                        "well_transition_duration": transition_duration,
                         "production_well_y_endpoint": 1e3,
                     }
                 )
