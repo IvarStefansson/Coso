@@ -8,9 +8,9 @@ from matplotlib import pyplot as plt
 import run_example_2
 import run_example_4
 
-NUM_BINS_PER_INTERVAL = 5
+
 SHUT_IN_DURATION = 3 * pp.DAY
-FINAL_TIME = 6 * pp.YEAR
+FINAL_TIME = 10 * pp.YEAR
 PRODUCTION_WELL = "2 Production well"
 CASES_TO_PLOT = [2]
 
@@ -23,6 +23,13 @@ def get_intervals(
     """Return list of (start, end, kind) for every sub-interval.
 
     kind is ``'production'`` or ``'shut_in'``.
+
+    Note: when :class:`SmoothWellTransitions` is active, the last
+    ``well_transition_duration`` seconds of each shut-in window are a pressure-ramp
+    period (Dirichlet BC, non-zero flux).  Those seconds are still labelled
+    ``'shut_in'`` here because this function does not receive the transition duration.
+    The effect is confined to the final shut-in bin and is negligible when the
+    transition duration is short relative to the bin width.
     """
     n = int(np.ceil(final_time / production_period))
     intervals = []
@@ -39,30 +46,50 @@ def _monotone(times: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, np.nda
 
     Also removes the t=0 initial condition, which is set by initialisation and does
     not correspond to a converged time-stepped solution.
+
+    Non-converged time steps are saved before the solver retries, so a failed step at
+    time T appears *before* the eventual converged step at T (or at an intermediate
+    sub-step). A simple ``np.diff(times) > 0`` filter would keep the non-converged
+    value and discard the converged one. Instead we use a sliding-window approach:
+    when time goes backwards, pop the last accepted point and replace it with the
+    current one, so only the most recent (converged) value at each time is retained.
     """
     valid = ~np.isnan(values) & (times > 0)
     times, values = times[valid], values[valid]
-    mono = np.concatenate([[True], np.diff(times) > 0])
-    return times[mono], values[mono]
+    if len(times) == 0:
+        return times, values
+    accepted_times = [times[0]]
+    accepted_values = [values[0]]
+    for t, v in zip(times[1:], values[1:]):
+        if t < accepted_times[-1]:
+            # Time went backwards — the previous point was from a failed step; discard.
+            accepted_times.pop()
+            accepted_values.pop()
+        accepted_times.append(t)
+        accepted_values.append(v)
+    return np.array(accepted_times), np.array(accepted_values)
 
 
-def bin_slip_rate(
+def bin_moment_rate(
     frac_df: pd.DataFrame,
     fracture_id: str,
     t_start: float,
     t_end: float,
     n_bins: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Average slip rate (m/s) in each bin for one fracture and one interval.
+    """Average seismic moment rate (N·m/s) in each bin for one fracture and one interval.
 
     Returns ``(bin_edges, rates)`` where ``rates`` has length ``n_bins``.
     """
     df = frac_df[frac_df["fracture_id"] == fracture_id]
-    times, jumps = _monotone(df["time"].values, df["displacement_jump"].values)
+    times, jumps = _monotone(df["time"].values, df["seismic_moment"].values)
     bin_edges = np.linspace(t_start, t_end, n_bins + 1)
     rates = np.full(n_bins, np.nan)
     for k in range(n_bins):
         t0, t1 = bin_edges[k], bin_edges[k + 1]
+        # Inclusive on both sides: we need the value at t0 as well as t1 to compute
+        # the rate across the bin.  The bin edges coincide with schedule checkpoints,
+        # so t0 and t1 are always present in the data.
         mask = (times >= t0) & (times <= t1)
         t_bin, v_bin = times[mask], jumps[mask]
         dt_bin = t_bin[-1] - t_bin[0] if len(t_bin) >= 2 else 0.0
@@ -90,23 +117,26 @@ def bin_fluid_flux(
     avg_flux = np.full(n_bins, np.nan)
     for k in range(n_bins):
         t0, t1 = bin_edges[k], bin_edges[k + 1]
-        mask = (times >= t0) & (times <= t1)
+        # Strict left inequality: each checkpoint belongs to the bin that ends at it.
+        left = times > t0 if k > 0 or t_start > 0 else times >= t0
+        mask = left & (times <= t1)
         if mask.sum() > 0:
             avg_flux[k] = np.nanmean(fluxes[mask])
     return bin_edges, avg_flux
 
 
-def plot_slip_rate_and_flux_in_bins(
+def plot_seismic_moment_and_flux(
     csv_dir: Path | str,
     file_base: str,
     production_period: float,
     fracture_ids: list[str] | None = None,
-    num_bins_per_interval: int = NUM_BINS_PER_INTERVAL,
+    num_bins_per_interval: int = 4,
     shut_in_duration: float = SHUT_IN_DURATION,
     final_time: float = FINAL_TIME,
     production_well: str = PRODUCTION_WELL,
     title: str | None = None,
     out_path: Path | str | None = None,
+    symlog: bool = False,
 ) -> None:
     """Plot binned slip rate (left axis) and production flux (right axis) on a broken
     time axis, using a twin-y layout.
@@ -138,10 +168,26 @@ def plot_slip_rate_and_flux_in_bins(
         Optional figure title.
     out_path:
         If given, save the figure here instead of showing it.
+    symlog:
+        If ``True``, use a symmetric-log scale on the moment-rate axis (handles
+        zeros and negative values via a linear region near zero).  If ``False``
+        (default), use a plain log scale with non-positive values clipped to the
+        smallest positive value present so they are not silently dropped.
     """
     csv_dir = Path(csv_dir)
-    frac_df = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
-    well_df = pd.read_csv(csv_dir / f"{file_base}.csv")
+    try:
+        frac_df = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
+    except (pd.errors.EmptyDataError, FileNotFoundError):
+        print(f"Skipping {csv_dir}: fracture CSV not ready yet.")
+        return
+    try:
+        well_df = pd.read_csv(csv_dir / f"{file_base}.csv")
+        has_well_data = (
+            len(well_df) > 0 and production_well in well_df["well_name"].values
+        )
+    except (pd.errors.EmptyDataError, FileNotFoundError):
+        well_df = None
+        has_well_data = False
 
     if fracture_ids is None:
         fracture_ids = sorted(frac_df["fracture_id"].unique())
@@ -157,16 +203,17 @@ def plot_slip_rate_and_flux_in_bins(
     x_all = np.arange(total_bins)
 
     # --- Collect binned data ---
-    all_slip = {fid: np.full(total_bins, np.nan) for fid in fracture_ids}
+    all_moment_rate = {fid: np.full(total_bins, np.nan) for fid in fracture_ids}
     all_flux = np.full(total_bins, np.nan)
 
     for iv, (t_start, t_end, kind) in enumerate(intervals):
         sl = slice(iv * n_bins, (iv + 1) * n_bins)
         for fid in fracture_ids:
-            _, rates = bin_slip_rate(frac_df, fid, t_start, t_end, n_bins)
-            all_slip[fid][sl] = rates
-        _, fluxes = bin_fluid_flux(well_df, production_well, t_start, t_end, n_bins)
-        all_flux[sl] = fluxes
+            _, rates = bin_moment_rate(frac_df, fid, t_start, t_end, n_bins)
+            all_moment_rate[fid][sl] = rates
+        if has_well_data:
+            _, fluxes = bin_fluid_flux(well_df, production_well, t_start, t_end, n_bins)
+            all_flux[sl] = fluxes
 
     # --- Build broken-axis tick labels ---
     xtick_pos: list[float] = []
@@ -190,7 +237,7 @@ def plot_slip_rate_and_flux_in_bins(
     fig, ax1 = plt.subplots(figsize=(fig_width, 4))
     ax2 = ax1.twinx()
 
-    # Slip-rate bar colours: one per fracture from tab10.
+    # Moment-rate dot colours: one per fracture from tab10.
     frac_colors = plt.cm.tab10(np.linspace(0, 0.9, len(fracture_ids)))
 
     # Background shading and vertical separators.
@@ -204,37 +251,70 @@ def plot_slip_rate_and_flux_in_bins(
             iv * n_bins - 0.5, color="gray", linewidth=0.7, linestyle="--", zorder=1
         )
 
-    # --- Left axis: slip rate bars ---
-    bar_w = 0.7 / max(len(fracture_ids), 1)
-    offsets = np.linspace(-0.35 + bar_w / 2, 0.35 - bar_w / 2, len(fracture_ids))
-    slip_handles = []
+    # --- Left axis: moment rate dots (one per fracture, centred in each bin) ---
+    moment_handles = []
+    offsets = np.linspace(-0.2, 0.2, max(len(fracture_ids), 1))
     for fi, fid in enumerate(fracture_ids):
-        bars = ax1.bar(
+        _mr_label = f"Moment rate – {fid}" if len(fracture_ids) > 1 else "Moment rate"
+        (dot_line,) = ax1.plot(
             x_all + offsets[fi],
-            all_slip[fid],
-            width=bar_w,
+            all_moment_rate[fid],
             color=frac_colors[fi],
-            label=f"Slip rate – {fid}",
-            zorder=2,
+            linestyle="none",
+            marker="o",
+            markersize=6,
+            label=_mr_label,
+            zorder=3,
         )
-        slip_handles.append(bars)
-    ax1.set_ylabel("Slip rate (m/s)")
+        moment_handles.append(dot_line)
+    ax1.set_ylabel("Seismic moment rate (N·m/s)")
+
+    # Apply log or symlog scale to the moment-rate axis.
+    if symlog:
+        all_finite = np.concatenate(
+            [v[np.isfinite(v)] for v in all_moment_rate.values()]
+        )
+        linthresh = (
+            float(np.percentile(np.abs(all_finite[all_finite != 0]), 10))
+            if all_finite[all_finite != 0].size
+            else 1.0
+        )
+        ax1.set_yscale("symlog", linthresh=linthresh)
+    else:
+        # Clip non-positive values to the smallest positive value so log works.
+        all_positive = np.concatenate(
+            [v[v > 0] for v in all_moment_rate.values() if np.any(v > 0)]
+        )
+        floor = float(all_positive.min()) if all_positive.size else 1.0
+        for fid in fracture_ids:
+            all_moment_rate[fid] = np.where(
+                all_moment_rate[fid] > 0, all_moment_rate[fid], floor
+            )
+        # Re-plot with clipped data (replace existing line data).
+        for fi, fid in enumerate(fracture_ids):
+            moment_handles[fi].set_ydata(all_moment_rate[fid])
+        ax1.set_yscale("log")
+
     ax1.axhline(0, color="black", linewidth=0.6)
 
-    # --- Right axis: fluid flux line (bin mid-points) ---
-    (flux_line,) = ax2.plot(
-        x_all,
-        all_flux,
-        color="tab:green",
-        linewidth=1.5,
-        marker="o",
-        markersize=4,
-        label=f"Fluid flux – {production_well}",
-        zorder=3,
-    )
-    ax2.set_ylabel("Fluid flux (kg/s)")
+    # --- Right axis: fluid flux bars (only when well data is available) ---
+    if has_well_data:
+        flux_bars = ax2.bar(
+            x_all,
+            all_flux,
+            width=0.6,
+            color="tab:green",
+            alpha=0.5,
+            label="Production well flux",
+            zorder=2,
+        )
+        ax2.set_ylabel("Fluid flux (kg/s)")
+    else:
+        flux_bars = None
+        ax2.set_visible(False)
 
-    # --- x-axis ticks ---
+    # --- x-axis ticks and limits ---
+    ax1.set_xlim(-0.5, n_intervals * n_bins - 0.5)
     ax1.set_xticks(xtick_pos)
     ax1.set_xticklabels(xtick_lbl, fontsize=6, rotation=45, ha="right")
 
@@ -252,11 +332,15 @@ def plot_slip_rate_and_flux_in_bins(
             color="#1f5f9e" if kind == "production" else "#b85c00",
         )
 
-    # Combined legend (slip handles + flux handle on ax1 so it stays on top).
-    legend_handles = list(slip_handles) + [flux_line]
-    legend_labels = [f"Slip rate – {fid}" for fid in fracture_ids] + [
-        f"Fluid flux – {production_well}"
+    # Combined legend (moment handles + flux handle on ax1 so it stays on top).
+    legend_handles = list(moment_handles)
+    legend_labels = [
+        f"Moment rate – {fid}" if len(fracture_ids) > 1 else "Moment rate"
+        for fid in fracture_ids
     ]
+    if flux_bars is not None:
+        legend_handles.append(flux_bars)
+        legend_labels.append("Production well flux")
     ax1.legend(legend_handles, legend_labels, loc="upper left", fontsize=8)
 
     if title:
@@ -298,40 +382,41 @@ if __name__ == "__main__":
                             / "slip_rate_bins"
                             / f"{simulation_name}_slip_rate_bins.png"
                         )
-                        plot_slip_rate_and_flux_in_bins(
+                        plot_seismic_moment_and_flux(
                             csv_dir=csv_dir,
                             file_base=file_name,
                             production_period=production_period,
                             fracture_ids=["Fracture 2", "Fracture 3"],
-                            num_bins_per_interval=NUM_BINS_PER_INTERVAL,
+                            num_bins_per_interval=1,
                             final_time=6 * pp.YEAR,
                             title=title,
                             out_path=out_path,
                         )
     if 2 in CASES_TO_PLOT:
         # --- Example 2 (Case_II) ---
-        for velocity in run_example_2.boundary_velocities:
-            for period in run_example_2.production_periods:
-                production_period = period * pp.YEAR
-                simulation_name, folder_name, _, file_name, title = (
-                    run_example_2.names_from_params(velocity, period)
-                )
-                csv_dir = Path(folder_name + "_saved_data") / "well_monitoring"
-                if not (csv_dir / f"{file_name}_fractures.csv").exists():
-                    print(f"Missing fracture CSV for {simulation_name}, skipping.")
-                    continue
-                out_path = (
-                    Path("figures")
-                    / "slip_rate_bins"
-                    / f"{simulation_name}_slip_rate_bins.png"
-                )
-                plot_slip_rate_and_flux_in_bins(
-                    csv_dir=csv_dir,
-                    file_base=file_name,
-                    production_period=production_period,
-                    fracture_ids=["Fracture 2"],
-                    num_bins_per_interval=NUM_BINS_PER_INTERVAL,
-                    final_time=10 * pp.YEAR,
-                    title=title,
-                    out_path=out_path,
-                )
+        for with_prod in run_example_2.with_production:
+            for velocity in run_example_2.boundary_velocities:
+                for period in run_example_2.production_periods:
+                    production_period = period * pp.YEAR
+                    simulation_name, folder_name, _, file_name, title = (
+                        run_example_2.names_from_params(velocity, period, with_prod)
+                    )
+                    csv_dir = Path(folder_name + "_saved_data") / "well_monitoring"
+                    if not (csv_dir / f"{file_name}_fractures.csv").exists():
+                        print(f"Missing fracture CSV for {simulation_name}, skipping.")
+                        continue
+                    out_path = (
+                        Path("figures")
+                        / "slip_rate_bins"
+                        / f"{simulation_name}_slip_rate_bins.png"
+                    )
+                    plot_seismic_moment_and_flux(
+                        csv_dir=csv_dir,
+                        file_base=file_name,
+                        production_period=production_period,
+                        fracture_ids=["Fracture 2"],
+                        num_bins_per_interval=run_example_2.NUM_BINS_PER_INTERVAL,
+                        final_time=run_example_2.FINAL_TIME,
+                        title=title,
+                        out_path=out_path,
+                    )
