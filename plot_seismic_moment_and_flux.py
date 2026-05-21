@@ -9,16 +9,13 @@ import run_example_2
 import run_example_4
 
 
-SHUT_IN_DURATION = 3 * pp.DAY
-FINAL_TIME = 10 * pp.YEAR
-PRODUCTION_WELL = "2 Production well"
 CASES_TO_PLOT = [2]
 
 
 def get_intervals(
     production_period: float,
-    shut_in_duration: float = SHUT_IN_DURATION,
-    final_time: float = FINAL_TIME,
+    shut_in_duration: float,
+    final_time: float,
 ) -> list[tuple[float, float, str]]:
     """Return list of (start, end, kind) for every sub-interval.
 
@@ -126,14 +123,115 @@ def bin_fluid_flux(
 
 
 def plot_seismic_moment_and_flux(
+    frac_df: pd.DataFrame,
+    fracture_id: str,
+    column: str,
+    t_start: float,
+    t_end: float,
+    n_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Mean of a scalar fracture-CSV column in each bin for one fracture and interval.
+
+    Unlike :func:`bin_moment_rate` (which computes a *rate* by differencing), this
+    function returns the plain time-average of the column values within each bin.
+    Suitable for columns like ``average_pressure`` or ``average_critical_pressure``
+    that are already instantaneous scalars.
+
+    Parameters:
+        frac_df: Fracture monitoring DataFrame (from ``*_fractures.csv``).
+        fracture_id: Fracture ID to filter on.
+        column: Column name to aggregate.
+        t_start: Bin-interval start time (seconds).
+        t_end: Bin-interval end time (seconds).
+        n_bins: Number of equal bins.
+
+    Returns:
+        ``(bin_edges, avg_values)`` where ``avg_values`` has length ``n_bins``.
+    """
+    df = frac_df[frac_df["fracture_id"] == fracture_id]
+    times, values = _monotone(df["time"].values, df[column].values)
+    bin_edges = np.linspace(t_start, t_end, n_bins + 1)
+    avg_values = np.full(n_bins, np.nan)
+    for k in range(n_bins):
+        t0, t1 = bin_edges[k], bin_edges[k + 1]
+        left = times > t0 if k > 0 or t_start > 0 else times >= t0
+        mask = left & (times <= t1)
+        if mask.sum() > 0:
+            avg_values[k] = np.nanmean(values[mask])
+    return bin_edges, avg_values
+
+
+def bin_fracture_pvd(
+    pvd_dim_data: dict[str, np.ndarray],
+    subdomain_id: int,
+    quantity: str,
+    t_start: float,
+    t_end: float,
+    n_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Mean of a scalar PVD quantity in each bin for one fracture subdomain.
+
+    Reads cell-wise data from a ``split_by_subdomain`` result, computes the
+    unweighted spatial mean across all cells at each time step, then time-averages
+    within each bin.  Use this for quantities not captured in the monitoring CSV
+    (e.g., historical runs or spatially-resolved fields).
+
+    Parameters:
+        pvd_dim_data: The fracture-dimension entry returned by
+            :func:`~load_pvd_data.load_from_pvd`, i.e.
+            ``subdomains[nd - 1]``.  Must have been loaded with ``quantity``
+            and ``"subdomain_id"`` (or ``"fracture_name"``) included in the
+            ``quantities`` list so that :func:`~load_pvd_data.split_by_subdomain`
+            can partition the cells.
+        subdomain_id: Integer subdomain id to extract (key in the dict returned
+            by :func:`~load_pvd_data.split_by_subdomain`).
+        quantity: Name of the scalar cell-data array to aggregate.
+        t_start: Bin-interval start time (seconds).
+        t_end: Bin-interval end time (seconds).
+        n_bins: Number of equal bins.
+
+    Returns:
+        ``(bin_edges, avg_values)`` where ``avg_values`` has length ``n_bins``.
+        Returns all-NaN ``avg_values`` if ``quantity`` is absent or
+        ``subdomain_id`` is not found.
+
+    Note:
+        The spatial average is *unweighted* (plain mean over cells).  To obtain
+        a volume-weighted average, export ``cell_volumes`` from PorePy and pass
+        them as an additional quantity, then compute the weighted mean manually.
+    """
+    bin_edges = np.linspace(t_start, t_end, n_bins + 1)
+    avg_values = np.full(n_bins, np.nan)
+
+    per_sd = split_by_subdomain(pvd_dim_data)
+    if subdomain_id not in per_sd or quantity not in per_sd[subdomain_id]:
+        return bin_edges, avg_values
+
+    sd_data = per_sd[subdomain_id]
+    times = sd_data["times"]  # shape (T,)
+    arr = sd_data[quantity]  # shape (T, n_cells) for scalars
+
+    # Spatial mean across cells at each time step.
+    spatial_mean = np.nanmean(arr, axis=1)  # shape (T,)
+
+    for k in range(n_bins):
+        t0, t1 = bin_edges[k], bin_edges[k + 1]
+        left = times > t0 if k > 0 or t_start > 0 else times >= t0
+        mask = left & (times <= t1)
+        if mask.sum() > 0:
+            avg_values[k] = np.nanmean(spatial_mean[mask])
+    return bin_edges, avg_values
+
+
+def plot_seismic_moment_and_flux(
     csv_dir: Path | str,
     file_base: str,
     production_period: float,
+    shut_in_duration: float,
+    final_time: float,
+    production_well: str,
     fracture_ids: list[str] | None = None,
     num_bins_per_interval: int = 4,
-    shut_in_duration: float = SHUT_IN_DURATION,
-    final_time: float = FINAL_TIME,
-    production_well: str = PRODUCTION_WELL,
     title: str | None = None,
     out_path: Path | str | None = None,
     symlog: bool = False,
@@ -154,16 +252,16 @@ def plot_seismic_moment_and_flux(
         Base name for the CSV files (e.g. ``"example_4"``).
     production_period:
         Duration of one full production cycle in seconds.
-    fracture_ids:
-        Fracture IDs to include.  Defaults to all fractures in the CSV.
-    num_bins_per_interval:
-        Number of equal bins per sub-interval.
     shut_in_duration:
         Duration of each shut-in period in seconds.
     final_time:
         Simulation end time in seconds (used to infer number of cycles).
     production_well:
         Well name string used to filter the well CSV.
+    fracture_ids:
+        Fracture IDs to include.  Defaults to all fractures in the CSV.
+    num_bins_per_interval:
+        Number of equal bins per sub-interval.
     title:
         Optional figure title.
     out_path:
@@ -388,7 +486,9 @@ if __name__ == "__main__":
                             production_period=production_period,
                             fracture_ids=["Fracture 2", "Fracture 3"],
                             num_bins_per_interval=1,
-                            final_time=6 * pp.YEAR,
+                            shut_in_duration=run_example_4.SHUT_IN_DURATION,
+                            final_time=run_example_4.FINAL_TIME,
+                            production_well=run_example_4.PRODUCTION_WELL,
                             title=title,
                             out_path=out_path,
                         )
@@ -416,7 +516,9 @@ if __name__ == "__main__":
                         production_period=production_period,
                         fracture_ids=["Fracture 2"],
                         num_bins_per_interval=run_example_2.NUM_BINS_PER_INTERVAL,
+                        shut_in_duration=run_example_2.SHUT_IN_DURATION,
                         final_time=run_example_2.FINAL_TIME,
+                        production_well=run_example_2.PRODUCTION_WELL,
                         title=title,
                         out_path=out_path,
                     )
