@@ -14,6 +14,7 @@ from geometry import ConceptualGeometryTwoFractures
 from material_parameters import granodiorite_values
 from physical_model import HeterogeneousPermeabilitySpecification, PhysicalModel
 from diff_tpfa import DarcysLawAdEverywhere
+from time_manager import CosoTimeManager as TimeManager
 
 try:
     import pp_solvers
@@ -49,6 +50,8 @@ from wells import WellDataConceptual
 LOG_TO_FILE = False
 log_dir = "example_2_logs"
 FINAL_TIME = 1 * pp.YEAR
+SHUT_IN_DURATION = 3 * pp.DAY
+PRODUCTION_WELL = "2 Production well"
 
 if LOG_TO_FILE:
     # Create log directory if it doesn't exist
@@ -255,21 +258,24 @@ def names_from_params(velocity: float, period: float, with_production: bool):
 
 
 def time_managers(schedule: np.ndarray, dt: float, production_period: float):
-    time_manager = pp.TimeManager(
+    ks = np.full(schedule.shape[0] - 1, 3)
+    dt_min_max = [(1e-2, dt_max / k) for dt_max, k in zip(np.diff(schedule), ks)]
+    time_manager = TimeManager(
         schedule=schedule,
         dt_init=dt,
-        dt_min_max=(1e-2, max(dt, production_period / 10)),
+        dt_min_max=dt_min_max,
         iter_max=20,
         iter_optimal_range=(5, 12),
-        iter_relax_factors=(0.6, 2.0),
+        iter_relax_factors=(0.6, 2.5),
         recomp_factor=0.2,
         recomp_max=10,
         rtol=1e-20,  # Low rtol due to large time values.
         atol=1e-5,
     )
+    # 5e9 s ≈ 158 years, which is safely below the production period for all cases.
     dt_init = 5e9
-    time_manager_init = pp.TimeManager(
-        [0, 5 * dt_init],
+    time_manager_init = TimeManager(
+        schedule=[0, 3 * dt_init],
         dt_init=dt_init,
         dt_min_max=(1, 2 * dt_init),
         iter_max=20,
@@ -324,7 +330,7 @@ if __name__ == "__main__":
         for velocity in boundary_velocities:
             for period in production_periods:
                 # Define the time parameters
-                dt = 1e2
+                dt = 1e3
                 production_period = period * pp.YEAR
                 domain_size = 4.0e3
                 fracture_size = 5e2
