@@ -408,6 +408,64 @@ class CosoExporter:
         [Sequence[pp.Grid] | Sequence[pp.MortarGrid], str, str], np.ndarray
     ]
 
+    @staticmethod
+    def critical_pressure_for_slip(
+        traction_pa: np.ndarray,
+        friction_coefficient: np.ndarray,
+        atol: float = 1e-8,
+    ) -> np.ndarray:
+        """Compute the fracture pressure required to trigger slip at each cell.
+
+        The critical pressure is the pore pressure at which the effective normal
+        traction becomes just small enough (less compressive) to satisfy the Coulomb
+        slip criterion:
+
+            ‖τ‖ = μ · |t_n_eff|,   where  t_n_eff = t_n + p.
+
+        Solving for p gives the cell-wise critical pressure:
+
+            p_crit = −(t_n + ‖τ‖/μ).
+
+        Assumptions:
+            1. The shear and normal tractions are evaluated at the *current* mechanical
+               state and are assumed to remain constant as pore pressure changes.  This
+               is a frozen-stress (undrained) approximation: it predicts the pressure
+               increment needed to cause slip *without* re-solving the coupled system.
+            2. Fluid pressure acts directly on the fracture walls without Biot
+               attenuation: t_n_eff = t_n + p.  The Biot coefficient α does not appear
+               because there is no porous matrix mediating the pressure at the fracture
+               face (cf. PorePy's ``fracture_pressure_stress``, which adds p directly).
+            3. Tension-positive sign convention (PorePy standard): compressive normal
+               traction is negative; the fracture is in contact when t_n < 0.
+            4. Cells where the fracture is open (|t_n| ≈ 0) have no contact force, so
+               the critical pressure is undefined and returned as NaN.
+            5. Cohesion is neglected; only frictional resistance is considered.
+
+        Parameters:
+            traction_pa: Contact traction in Pa, shape ``(nd, num_cells)``.  The last
+                row is the normal component (negative in compression); the preceding
+                rows are the shear components.
+            friction_coefficient: Friction coefficient, shape ``(num_cells,)`` or
+                scalar-broadcastable.
+            atol: Absolute tolerance (Pa) for detecting open-fracture cells
+                (zero normal traction).  Defaults to 1e-8.
+
+        Returns:
+            Array of shape ``(num_cells,)`` with the critical pore pressure in Pa.
+            Cells where the fracture is already slipping return a value ≤ the current
+            pore pressure.  Open-fracture cells return NaN.
+        """
+        t_n = traction_pa[-1]  # normal component, negative in compression
+        tau_norm = np.linalg.norm(traction_pa[:-1], axis=0)  # shear magnitude
+
+        p_crit = -(t_n + tau_norm / friction_coefficient)
+
+        # Open fractures: normal traction is zero → slip tendency undefined.
+        open_cells = np.isclose(t_n, 0.0, atol=atol)
+        p_crit[open_cells] = np.nan
+
+        return p_crit
+
     def slip_onset_times(self) -> dict:
         """Compute sliding onset time for each fracture."""
         sliding_onset_times = {}
@@ -604,7 +662,16 @@ class CosoExporter:
         traction = self.evaluate_and_scale(fracs, "contact_traction", "-").reshape(
             (self.nd, -1), order="F"
         )
+        # Scale dimensionless traction to Pa for use in critical-pressure calculation.
+        char_traction = self.evaluate_and_scale(
+            fracs, "characteristic_contact_traction", "Pa"
+        )
+        traction_pa = traction * char_traction  # broadcast over nd rows
         slip_tendency = self.compute_slip_tendency(traction, friction_coefficient)
+        p_crit_cells = self.critical_pressure_for_slip(
+            traction_pa, friction_coefficient
+        )
+        frac_pressure = self.evaluate_and_scale(fracs, "pressure", "Pa")
         G = self.solid.shear_modulus
         for id, sd in enumerate(fracs):
             key = self.fracture_names()[sd.frac_num]
@@ -616,6 +683,23 @@ class CosoExporter:
                 "seismic_moment": G * total_slip_x_area,
             }
             data[key]["slip_tendency"] = np.nanmean(
+                slip_tendency[cell_offsets[id] : cell_offsets[id + 1]]
+            )
+            cell_p = frac_pressure[cell_offsets[id] : cell_offsets[id + 1]]
+            data[key]["average_pressure"] = float(np.average(cell_p, weights=cell_vols))
+            cell_p_crit = p_crit_cells[cell_offsets[id] : cell_offsets[id + 1]]
+            # Volume-weighted mean over in-contact cells only (NaN = open fracture).
+            in_contact = ~np.isnan(cell_p_crit)
+            if np.any(in_contact):
+                data[key]["average_critical_pressure"] = float(
+                    np.average(cell_p_crit[in_contact], weights=cell_vols[in_contact])
+                )
+            else:
+                data[key]["average_critical_pressure"] = float("nan")
+            data[key]["slip_tendency_minimum"] = np.nanmin(
+                slip_tendency[cell_offsets[id] : cell_offsets[id + 1]]
+            )
+            data[key]["slip_tendency_maximum"] = np.nanmax(
                 slip_tendency[cell_offsets[id] : cell_offsets[id + 1]]
             )
         return data
