@@ -409,6 +409,7 @@ if __name__ == "__main__":
                     "fourier_flux_discretization": "tpfa" if tp else "mpfa",
                     "use_ic_interpolation": True,
                     "boundary_displacement_velocity": velocity / pp.YEAR,
+                    "surface_temperature": pp.Celsius_to_Kelvin(30.0),
                 }
                 model_params = copy.deepcopy(model_params_init)
                 if with_prod:

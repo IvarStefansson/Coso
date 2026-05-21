@@ -5,11 +5,55 @@ import porepy as pp
 
 
 class CosoBackgroundValues:
+    def hydrostatic_pressure(self, depth: np.ndarray) -> np.ndarray:
+        r"""Compute hydrostatic pressure at given depths.
+
+        According to Exploring Whether Subsurface Fluid Production Can Minimize
+        Triggered Seismicity in Geothermal Fields K. A. Kroll, H. Wu, P. Fu, the
+        pressure gradient is 7.19 MPa/km
+
+        Parameters:
+            depth: Array of depths at which to compute hydrostatic pressure.
+
+        Returns:
+            Array of hydrostatic pressure values at the given depths.
+
+        """
+        gradient = self.units.convert_units(7.19e3, "Pa/m")
+        pressure = gradient * depth + self.units.convert_units(
+            pp.ATMOSPHERIC_PRESSURE, units="Pa"
+        )
+        return pressure
+
+    def temperature_at_depth(self, depth: np.ndarray) -> np.ndarray:
+        """Compute temperature at given depths.
+
+        Parameters:
+            depth: Array of depths at which to compute temperature.
+
+        Returns:
+            Array of temperature values at the given depths.
+        """
+        # Steep gradient of 245 K/km first 1.1 km, then 5.6 K/km below that, according
+        # to Kroll et al.
+        surface_temperature = self.params.get(
+            "surface_temperature", self.units.convert_units(20, "Celsius")
+        )
+        gradient1 = self.units.convert_units(245, "K/km")
+        gradient2 = self.units.convert_units(5.6, "K/km")
+        temperature = np.where(
+            depth < 1100,
+            surface_temperature + gradient1 * depth,
+            surface_temperature + gradient1 * 1100 + gradient2 * (depth - 1100),
+        )
+        return temperature
+
     def displacement_from_depth(self, coords: np.ndarray) -> np.ndarray:
         """Depth-dependent displacement.
 
-        The x and y displacements are proportional to the distance from the center of the domain
-        in the xy-plane and to depth. The z displacement is proportional to the depth.
+        The x and y displacements are proportional to the distance from the center of
+        the domain in the xy-plane and to depth. The z displacement is proportional to
+        the depth.
 
         Parameters:
             coords ``shape=(3, num_cells)``: Coordinates.
