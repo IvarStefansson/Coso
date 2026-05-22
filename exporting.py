@@ -559,6 +559,24 @@ class CosoExporter:
                         ),
                     )
                 )
+            if hasattr(self, "temperature_at_depth"):
+                data.append(
+                    (
+                        sd,
+                        "temperature_at_depth",
+                        self.units.convert_units(
+                            self.temperature_at_depth(depth), "K", to_si=True
+                        ),
+                    )
+                )
+            if hasattr(self, "permeability_vals") and sd.dim == self.nd:
+                data.append(
+                    (
+                        sd,
+                        "permeability_value",
+                        self.evaluate_and_scale([sd], "permeability_vals", "m^2"),
+                    )
+                )
             # Export face-wise fluxes as cell-averaged vectors
             if hasattr(self, "fluid_flux"):
                 if sd.dim > 0:
