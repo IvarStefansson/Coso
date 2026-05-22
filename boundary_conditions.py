@@ -536,8 +536,10 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
         ``(neumann_end, neumann_end + well_transition_duration]``, i.e. the closing
         ``well_transition_duration`` seconds of each shut-in period.
 
-        The very first production period (t = 0) is deliberately excluded because
-        that transition is handled by the initialization model.
+        If an initial shut-in interval ``(0, t_end)`` is included in
+        ``neumann_intervals``, its end time ``t_end`` appears first so that the
+        opening ramp at simulation start is handled by the same mechanism as
+        mid-simulation production ramps.
         """
         return [e for _, e in self.params.get("neumann_intervals", [])]
 
@@ -569,28 +571,35 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
             if face_idx is None:
                 continue
             well_name = self.parent_well(sd).tags["well_name"]
-            # Darcy flux at top face.
-            flux_vals = self.darcy_flux([sd]).value(self.equation_system)
-            # When setting BC values, the sign of the flux is with respect to the
-            # outward normal of the boundary. However, the flux values returned by the
-            # equation system are with respect to the normal of the face. Flip sign if
-            # actual normal is opposite to outward normal.
-            out_normal = (
-                np.array([0.0, 0.0, 1.0]) if self.nd == 3 else np.array([0.0, 1.0])
-            )
-            outwards_normal_sign = sd.face_normals[:, face_idx] @ out_normal
-            self._cached_well_top_flux[well_name] = float(
-                flux_vals[face_idx] * outwards_normal_sign
-            )
-            # Pressure at top face (shallowest cell).
-            p_vals = self.pressure_trace([sd]).value(self.equation_system)
-            self._cached_well_top_pressure[well_name] = float(p_vals[face_idx])
+            # Only update each cache while the corresponding ramp is NOT active.
+            # Updating mid-ramp would re-anchor the starting value and distort all
+            # subsequent steps in that window (the formula would use a partially-ramped
+            # value as its "from" endpoint rather than the true pre-ramp value).
+            if self._transition_progress(self._shutin_start_times()) is None:
+                # Not inside a shut-in-start ramp: safe to refresh flux cache.
+                flux_vals = self.darcy_flux([sd]).value(self.equation_system)
+                # When setting BC values, the sign of the flux is with respect to the
+                # outward normal of the boundary. However, the flux values returned by
+                # the equation system are with respect to the normal of the face. Flip
+                # sign if actual normal is opposite to outward normal.
+                out_normal = (
+                    np.array([0.0, 0.0, 1.0]) if self.nd == 3 else np.array([0.0, 1.0])
+                )
+                outwards_normal_sign = sd.face_normals[:, face_idx] @ out_normal
+                self._cached_well_top_flux[well_name] = float(
+                    flux_vals[face_idx] * outwards_normal_sign
+                )
+            if self._transition_progress(self._production_start_times()) is None:
+                # Not inside a production-start ramp: safe to refresh pressure cache.
+                p_vals = self.pressure_trace([sd]).value(self.equation_system)
+                self._cached_well_top_pressure[well_name] = float(p_vals[face_idx])
 
     def bc_values_pressure(self, bg: pp.BoundaryGrid) -> np.ndarray:
-        """Ramp well-head pressure from reservoir pressure at production-start.
+        """Ramp well-head pressure from the last known reservoir pressure toward the
+        scheduled well-head pressure over the transition window at production-start.
 
-        Outside the opening transition window the values are identical to the
-        parent implementation (scheduled well-head pressure).
+        Outside all ramp windows the values are identical to the parent
+        implementation (scheduled well-head pressure).
         """
         vals = super().bc_values_pressure(bg)  # type: ignore[misc]
         sd = bg.parent
@@ -619,10 +628,10 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
         return vals
 
     def bc_values_darcy_flux(self, bg: pp.BoundaryGrid) -> np.ndarray:
-        """Ramp Darcy flux to zero during the shut-in closing transition.
+        """Ramp Darcy flux to zero at production wells during the shut-in transition.
 
-        Outside the closing transition window the values are identical to the
-        parent implementation (zero flux during shut-in).
+        Outside the transition window the values are identical to the parent
+        implementation.
         """
         vals = super().bc_values_darcy_flux(bg)  # type: ignore[misc]
         sd = bg.parent

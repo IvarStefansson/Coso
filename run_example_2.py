@@ -103,12 +103,14 @@ class BaseModel(
     def create_plot_title(self) -> str:
         """Generate a formatted plot title from folder name and simulation parameters.
 
-        Extracts simulation metadata from folder name (strike angle, fracture index, well status)
-        and formats it as a human-readable title. Fracture indices are incremented by 1 for
-        display purposes (0-indexed internally, 1-indexed for display).
+        Extracts simulation metadata from folder name (strike angle, fracture index,
+        well status) and formats it as a human-readable title. Fracture indices are
+        incremented by 1 for display purposes (0-indexed internally, 1-indexed for
+        display).
 
         Returns:
-            str | None: Formatted plot title with well status, strike angle, and fracture info.
+            str | None: Formatted plot title with well status, strike angle, and
+            fracture info.
 
         Example:
             Input folder_name: "case_II_with_wells_strike_35_tilted_fracture_0"
@@ -144,13 +146,15 @@ def create_schedule(
     final_time: float = 10 * pp.YEAR,
     num_bins_per_interval: int | None = None,
     transition_duration: float = 0.0,
+    initial_shutin_duration: float = 0.0,
+    with_production: bool = True,
 ) -> tuple[np.ndarray, Sequence[tuple[float, float]]]:
     """Build a simulation time schedule with alternating production and shut-in periods.
 
-    Each cycle consists of a production sub-interval of length
-    ``production_period - shut_in_duration`` followed by a shut-in sub-interval of
-    length ``shut_in_duration``.  The schedule always starts at t=0 and ends at the
-    last cycle boundary that is needed to cover ``final_time``.
+    Each cycle consists of a production sub-interval of length ``production_period -
+    shut_in_duration`` followed by a shut-in sub-interval of length
+    ``shut_in_duration``.  The schedule always starts at t=0 and ends at the last cycle
+    boundary that is needed to cover ``final_time``.
 
     Shut-in periods correspond to intervals where Neumann (zero-flux) well boundary
     conditions are applied instead of prescribed pressures.  The returned
@@ -160,8 +164,8 @@ def create_schedule(
     If ``num_bins_per_interval`` is given, equally-spaced bin-boundary times are
     inserted into the schedule for *both* the production and shut-in sub-intervals of
     every cycle.  This ensures that the time integrator always outputs a state at each
-    bin edge, so that post-processing (slip-rate / flux binning) can read off values
-    at exactly the right times without interpolation.
+    bin edge, so that post-processing (slip-rate / flux binning) can read off values at
+    exactly the right times without interpolation.
 
     Parameters:
         production_period: Duration of one full cycle (production + shut-in) in seconds.
@@ -170,8 +174,16 @@ def create_schedule(
         final_time: Total simulation end time in seconds (default: 10 years).  The
             number of cycles is rounded up so the schedule covers at least this long.
         num_bins_per_interval: Number of equal bins per sub-interval (production *and*
-            shut-in).  When given, ``num_bins_per_interval + 1`` evenly-spaced
-            boundary times are added to the schedule for each sub-interval.
+            shut-in).  When given, ``num_bins_per_interval + 1`` evenly-spaced boundary
+            times are added to the schedule for each sub-interval.
+        initial_shutin_duration: Duration of an optional zero-flux shut-in period at
+            the very start of the simulation (seconds, default 0 = disabled).  When
+            non-zero, Neumann BCs are active on all well grids for
+            ``(0, initial_shutin_duration - transition_duration]``, then the existing
+            production-ramp machinery linearly ramps the well-head pressure from the
+            cached no-flow pressure to the scheduled target over the final
+            ``transition_duration`` seconds of the initial shut-in.  Must be strictly
+            greater than ``transition_duration`` when ``transition_duration > 0``.
 
     Returns:
         tuple: A tuple containing:
@@ -180,6 +192,10 @@ def create_schedule(
             - neumann_intervals (list[tuple[float, float]]): One ``(start, end)``
               tuple per shut-in period, used to activate zero-flux well BCs.
     """
+    if not with_production:
+        # No need to add transition checkpoints if there is no production, since the BC
+        # type never changes.
+        transition_duration = 0.0
     if transition_duration > shut_in_duration:
         raise ValueError(
             f"transition_duration ({transition_duration:.3g} s) must not exceed "
@@ -192,14 +208,22 @@ def create_schedule(
 
     # For each cycle i (1-indexed), add the shut-in start (= production end) and the
     # cycle end.  These are the mandatory checkpoint times that delimit each sub-
-    # interval boundary.  t=0 is prepended separately below.
-    # If a transition duration is set, also insert the Neumann interval end
-    # (= cycle end − transition_duration) so the Neumann→Dirichlet switch always
-    # starts at an exact schedule boundary.
+    # interval boundary.  t=0 is prepended separately below. If a transition duration is
+    # set, also insert the time of full shut-in (shut-in start + transition duration)
+    # and the time of production ramp start (cycle end - transition duration) for each
+    # cycle. This ensures that the time integrator always steps at these critical times
+    # where the BC type or target value changes, so the transition is well-resolved and
+    # consistent across runs. The production ramp start is placed exactly at the end of
+    # the transition window that follows and the Neumann interval end (= cycle end −
+    # transition_duration) so the Neumann→Dirichlet switch always starts at an exact
+    # schedule boundary.
     checkpoints = []
     for i in np.arange(1, n + 1):
         checkpoints.append(i * production_period - shut_in_duration)
         if transition_duration > 0.0:
+            checkpoints.append(
+                i * production_period - shut_in_duration + transition_duration
+            )
             checkpoints.append(i * production_period - transition_duration)
         checkpoints.append(i * production_period)
     schedule = np.array(checkpoints)
@@ -222,6 +246,25 @@ def create_schedule(
 
     # Prepend t=0 so the time manager starts from the initial condition.
     schedule = np.insert(schedule, 0, 0.0)
+
+    # If requested, prepend an initial shut-in Neumann interval and insert its mandatory
+    # checkpoints into the schedule. The pure zero-flux period runs from t=0 to
+    # t=(initial_shutin_duration - transition_duration); the final transition_duration
+    # seconds of the initial shut-in are the production ramp window, handled
+    # automatically by _production_start_times() / _transition_progress().
+    if initial_shutin_duration > 0.0:
+        if transition_duration > 0.0 and initial_shutin_duration <= transition_duration:
+            raise ValueError(
+                f"initial_shutin_duration ({initial_shutin_duration:.3g} s) must be "
+                f"strictly greater than transition_duration ({transition_duration:.3g} s) "
+                "so that at least one converged zero-flux step populates the pressure cache."
+            )
+        ramp_start = initial_shutin_duration - transition_duration
+        extra: list[float] = [initial_shutin_duration]
+        if transition_duration > 0.0:
+            extra.append(ramp_start)
+        schedule = np.unique(np.concatenate([schedule, extra]))
+        neumann_intervals = [(0.0, ramp_start)] + neumann_intervals
 
     if num_bins_per_interval is not None:
         bin_times = []
@@ -258,7 +301,10 @@ def names_from_params(velocity: float, period: float, with_production: bool):
 
 
 def time_managers(schedule: np.ndarray, dt: float, production_period: float):
-    ks = np.full(schedule.shape[0] - 1, 3)
+    # Target reduction factor per interval boundary crossing.  This is used to compute
+    # the maximum time step size for each interval as a fraction of the interval length.
+    # Can be tailored based on type/length of interval.
+    ks = np.full(schedule.shape[0] - 1, 2.0)
     dt_min_max = [(1e-2, dt_max / k) for dt_max, k in zip(np.diff(schedule), ks)]
     time_manager = TimeManager(
         schedule=schedule,
@@ -318,9 +364,12 @@ production_periods = [
     1.0,
 ]  # In years
 transition_duration = 2 * pp.HOUR
+INITIAL_SHUTIN_DURATION = (
+    SHUT_IN_DURATION  # short shut-in at t=0 to populate no-flow pressure cache
+)
 if __name__ == "__main__":
     tp = True
-    copy_plots = True
+    copy_plots = False
     if LOG_TO_FILE:
         print(f"Logging to file: {log_file}")
 
@@ -343,6 +392,8 @@ if __name__ == "__main__":
                     final_time=FINAL_TIME,
                     num_bins_per_interval=NUM_BINS_PER_INTERVAL,
                     transition_duration=transition_duration,
+                    initial_shutin_duration=INITIAL_SHUTIN_DURATION,
+                    with_production=with_prod,
                 )
                 time_manager, time_manager_init = time_managers(
                     schedule, dt, production_period
