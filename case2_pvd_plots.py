@@ -95,7 +95,7 @@ def _flux_vector_to_magnitude(sd_data: dict) -> np.ndarray:
 
 
 PVD_QUANTITIES: list[Panel | tuple[str, str]] = [
-    ("temperature", "Avg. temperature (K)"),
+    # ("temperature", "Avg. temperature (K)"),
     Panel(
         "Fluid flux magnitude (kg/(m²·s))",
         [
@@ -109,10 +109,10 @@ PVD_QUANTITIES: list[Panel | tuple[str, str]] = [
     Panel(
         "Slip tendency (−)",
         [
-            Quantity("mean", inputs=["slip_tendency"]),
-            Quantity(
-                "min", inputs=["slip_tendency"], spatial_fn=np.nanmin, linestyle="--"
-            ),
+            # Quantity("mean", inputs=["slip_tendency"]),
+            # Quantity(
+            #     "min", inputs=["slip_tendency"], spatial_fn=np.nanmin, linestyle="--"
+            # ),
             Quantity(
                 "max", inputs=["slip_tendency"], spatial_fn=np.nanmax, linestyle=":"
             ),
@@ -122,8 +122,8 @@ PVD_QUANTITIES: list[Panel | tuple[str, str]] = [
         "Fracture pressure (Pa)",
         [
             Quantity("mean", inputs=["pressure"]),
-            Quantity("min", inputs=["pressure"], spatial_fn=np.nanmin, linestyle="--"),
-            Quantity("max", inputs=["pressure"], spatial_fn=np.nanmax, linestyle=":"),
+            # Quantity("min", inputs=["pressure"], spatial_fn=np.nanmin, linestyle="--"),
+            # Quantity("max", inputs=["pressure"], spatial_fn=np.nanmax, linestyle=":"),
         ],
     ),
     Panel(
