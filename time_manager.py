@@ -169,19 +169,25 @@ class CosoTimeManager(pp.TimeManager):
     def _get_interval_idx(self, is_recomputing: bool = False) -> int:
         """Return the 0-based index of the current schedule interval.
 
-        After :meth:`_correction_based_on_schedule` re-syncs ``_scheduled_idx``
-        to ``searchsorted(schedule, time, side='right')``, the current interval
-        is ``_scheduled_idx - 1``.
+        Uses ``searchsorted`` directly on ``self.time`` rather than relying on
+        ``_scheduled_idx``.  The internal counter is only incremented when
+        ``time + dt > schedule_point`` (strictly greater), so a step that lands
+        *exactly* on a schedule boundary leaves ``_scheduled_idx`` pointing at
+        the just-reached point instead of the next one.  Any correction method
+        that runs before :meth:`_correction_based_on_schedule` (which re-syncs
+        the counter) would therefore select the previous interval and apply the
+        wrong ``dt_max``, allowing a schedule-correction to override it with a
+        step larger than intended.
 
-        When called from :meth:`_adaptation_based_on_recomputation` (before the
-        internal ``_scheduled_idx`` decrement for a schedule-boundary hit),
-        *is_recomputing* should be ``True`` so the index is offset by one.
+        With ``searchsorted`` the correct interval is always derived from the
+        current time, making ``_scheduled_idx`` irrelevant here.  The
+        ``is_recomputing`` parameter is retained for API compatibility but is no
+        longer needed: after :meth:`_adaptation_based_on_recomputation` rewinds
+        ``self.time -= self.dt``, ``searchsorted`` on the rewound time returns
+        the correct interval automatically.
         """
         n = len(self.schedule) - 1
-        if is_recomputing and self._is_about_to_hit_schedule:
-            idx = self._scheduled_idx - 2
-        else:
-            idx = self._scheduled_idx - 1
+        idx = int(np.searchsorted(self.schedule, self.time, side="right")) - 1
         return max(0, min(idx, n - 1))
 
     # ------------------------------------------------------------------
