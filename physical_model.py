@@ -133,16 +133,20 @@ class HeterogeneousPermeabilitySpecification:
             return super().matrix_permeability(subdomains)
         if len(subdomains) == 0:
             return pp.wrap_as_dense_ad_array(0, size=0)
+        permeability = self.permeability_vals(subdomains)
+        return self.isotropic_second_order_tensor(subdomains, permeability)
+
+    def permeability_vals(self, subdomains: list[pp.Grid]) -> np.ndarray:
         cc = np.hstack([sd.cell_centers for sd in subdomains])
         size = sum(sd.num_cells for sd in subdomains)
         vals = self.solid.permeability * np.ones(size)
         high_perm_zones = self._high_perm_zones(cc)
         # Set permeability in the high permeability zones.
-        vals[high_perm_zones] *= 100
+        vals[high_perm_zones] *= 1000
         permeability = pp.wrap_as_dense_ad_array(
             vals, size, name="heterogeneous_permeability"
         )
-        return self.isotropic_second_order_tensor(subdomains, permeability)
+        return permeability
 
     def _high_perm_zones(self, cc: np.ndarray) -> np.ndarray:
         """Identify high permeability zones. Set to central box of size 1/3 of domain.
@@ -154,12 +158,29 @@ class HeterogeneousPermeabilitySpecification:
             Boolean array indicating which cells are in the high permeability zones.
         """
         dx, dy, dz = self.domain_sizes()
-
-        zone_x = np.logical_and(cc[0, :] > dx / 3, cc[0, :] < 2 * dx / 3)
-        zone_y = np.logical_and(cc[1, :] > dy / 3, cc[1, :] < 2 * dy / 3)
-        zone_z = np.logical_and(-cc[2, :] > dz / 3, -cc[2, :] < 2 * dz / 3)
+        caprock_depth = self.caprock_depth()
+        reservoir_depth = self.reservoir_depth()
+        # zone_x = np.logical_and(cc[0, :] > dx / 3, cc[0, :] < 2 * dx / 3)
+        # zone_y = np.logical_and(cc[1, :] > dy / 3, cc[1, :] < 2 * dy / 3)
+        zone_z = np.logical_and(-cc[2, :] > caprock_depth, -cc[2, :] < reservoir_depth)
         return zone_z
         # return np.logical_and.reduce((zone_x, zone_y, zone_z))
+
+    def caprock_depth(self) -> float:
+        """Depth of the caprock.
+
+        Returns:
+            Depth of the caprock in meters.
+        """
+        return self.params.get("caprock_depth", 1.1e3)
+
+    def reservoir_depth(self) -> float:
+        """Depth of the reservoir.
+
+        Returns:
+            Depth of the reservoir in meters.
+        """
+        return self.params.get("reservoir_depth", 3e3)
 
 
 class FluidExtensions:
