@@ -351,7 +351,10 @@ def plot_seismic_moment_and_flux(
 
     # --- Left axis: moment rate dots (one per fracture, centred in each bin) ---
     moment_handles = []
-    offsets = np.linspace(-0.2, 0.2, max(len(fracture_ids), 1))
+    if len(fracture_ids) > 1:
+        offsets = np.linspace(-0.2, 0.2, max(len(fracture_ids), 1))
+    else:
+        offsets = [0.0]
     for fi, fid in enumerate(fracture_ids):
         _mr_label = f"Moment rate – {fid}" if len(fracture_ids) > 1 else "Moment rate"
         (dot_line,) = ax1.plot(

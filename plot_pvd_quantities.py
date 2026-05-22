@@ -407,7 +407,12 @@ def build_panels(
                             continue
                         t_local = times_arr[mask]
                         # Map real time linearly to the interval's x-axis slot.
-                        x_local = iv * n_bins + (t_local - t0) / (t1 - t0) * n_bins
+                        if binned:
+                            x_local = iv * n_bins + (t_local - t0) / (t1 - t0) * n_bins
+                        else:
+                            x_local = (
+                                iv * n_bins - 0.5 + (t_local - t0) / (t1 - t0) * n_bins
+                            )
                         x_parts.append(x_local)
                         y_parts.append(spatial[mask])
                     if x_parts:
