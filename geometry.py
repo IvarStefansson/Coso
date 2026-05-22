@@ -266,13 +266,14 @@ class ConceptualGeometry(TwoEllipticFractures3d):
                 ]
             ]
         )
-        z_prod = np.array([[0, z / 2, z / 2]])
+        z_top = 0  # self._domain.bounding_box["zmax"]
+        z_prod = np.array([[z_top, z / 2, z / 2]])
         pts_prod = np.vstack([x_prod, y_prod, z_prod])
         # Create a well object.
         well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
         x_inj = np.full((1, 2), x + dx)
         y_inj = np.array([[y_mid + 2, y_mid - 1]])
-        z_inj = np.array([[0, 3 / 4 * z]])
+        z_inj = np.array([[z_top, 3 / 4 * z]])
         pts_inj = np.vstack([x_inj, y_inj, z_inj])
         # Create a well object.
         well_inj = pp.Well(
@@ -366,6 +367,44 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
         )
 
 
+class ConstraintsCapcrockAndReservoirDepth:
+    def set_fractures(self):
+        """Keep first fracture and create second fracture at same y location but different x location."""
+        # Call the parent class's set_fractures method
+        super().set_fractures()
+        # Set throughgoing fractures at the two depths
+        caprock_depth = self.caprock_depth()
+        reservoir_depth = self.reservoir_depth()
+        # Store length of fractures as was.
+        self._num_fractures = len(self._fractures)
+        for z in [caprock_depth, reservoir_depth]:
+            center = np.array(
+                [self.domain_sizes()[0] / 2, self.domain_sizes()[1] / 2, -z]
+            )
+            self._fractures.append(
+                pp.EllipticFracture(
+                    center=center,
+                    strike_angle=np.pi / 4,
+                    dip_angle=np.pi / 2,
+                    major_axis=self.fracture_major_axes[0],
+                    minor_axis=self.fracture_minor_axes[0],
+                    major_axis_angle=0,
+                )
+            )
+
+    def meshing_kwargs(self) -> dict:
+        """Ensure the two additional fractures are marked as constraints for meshing."""
+        kwargs = super().meshing_kwargs()
+        constraints = kwargs.get("constraints", [])
+        # Add if not already present, to avoid duplicates if this method is called
+        # multiple times.
+        constraints = set(constraints)
+        for i in range(self._num_fractures, self._num_fractures + 2):
+            constraints.add(i)
+        kwargs["constraints"] = list(constraints)
+        return kwargs
+
+
 class SubmergedDomain:
     def depth(self, coords: np.ndarray) -> np.ndarray:
         """Depth from the surface.
@@ -376,13 +415,12 @@ class SubmergedDomain:
             Array with depth values.
 
         """
-        top_surface = self.params.get("top_surface", -1.1e3)
-        return top_surface - coords[2]
+        return -coords[2]
 
     def set_domain(self) -> None:
         """Set the cubic domain."""
         x_size, y_size, z_size = self.domain_sizes()
-        top_surface = self.depth(np.zeros((3, 1)))
+        top_surface = self.params.get("top_surface", -1.1e3)
         box = {
             "xmin": 0.0,
             "xmax": x_size,

@@ -10,7 +10,11 @@ from boundary_conditions import (
     NeumannWellBCsFromSchedule,
     SmoothWellTransitions,
 )
-from geometry import ConceptualGeometryTwoFractures
+from geometry import (
+    ConceptualGeometryTwoFractures,
+    ConstraintsCapcrockAndReservoirDepth,
+)
+
 from material_parameters import granodiorite_values
 from physical_model import HeterogeneousPermeabilitySpecification, PhysicalModel
 from diff_tpfa import DarcysLawAdEverywhere
@@ -87,6 +91,7 @@ class BaseModel(
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
+    # ConstraintsCapcrockAndReservoirDepth,
     ConceptualGeometryTwoFractures,
     HeterogeneousPermeabilitySpecification,
     pp.constitutive_laws.CubicLawPermeability,
