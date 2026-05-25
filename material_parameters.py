@@ -40,7 +40,7 @@ granodiorite_values = {
     ),
     "biot_coefficient": 0.5,  # TODO: Find a reference and a value
     "dilation_angle": 0.0,  # TODO: Find a reference and a value
-    "permeability": 1e-18,  # [2], p. 1
+    "permeability": 1e-17,  # [2], p. 1
     "fracture_gap": 0e-4,  # TODO: Find a reference and a value
     "residual_aperture": 1e-3,  # TODO: Find a reference and a value
     "well_radius": 1.5e-1,  # TODO: Find a reference and a value. Not too far off if
