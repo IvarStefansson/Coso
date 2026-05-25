@@ -318,12 +318,16 @@ class HagenPoiseuilleWellPermeability:
 
         permeability = pp.wrap_as_dense_ad_array(
             0,
-            size=sum(sd.num_cells for sd in subdomains),
+            size=sum(sd.num_cells for sd in subdomains)
+            * 9,  # 9 for second-order tensor in 3D
             name="intersection_permeability",
         )
         if len(wells) > 0:
-            well_perm = pp.ad.Scalar(
-                well_perm_scalar, "hagen_poiseuille_well_permeability"
+            well_size = sum(sd.num_cells for sd in wells)
+            well_perm = pp.wrap_as_dense_ad_array(
+                well_perm_scalar,
+                size=well_size,
+                name="hagen_poiseuille_well_permeability",
             )
             well_tensor = self.isotropic_second_order_tensor(wells, well_perm)
             permeability = (
