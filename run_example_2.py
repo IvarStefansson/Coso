@@ -16,7 +16,11 @@ from geometry import (
 )
 
 from material_parameters import granodiorite_values
-from physical_model import HeterogeneousPermeabilitySpecification, PhysicalModel
+from physical_model import (
+    HeterogeneousPermeabilitySpecification,
+    PhysicalModel,
+    HagenPoiseuilleWellPermeability,
+)
 from diff_tpfa import DarcysLawAdEverywhere
 from time_manager import CosoTimeManager as TimeManager
 
@@ -94,6 +98,7 @@ class BaseModel(
     # ConstraintsCapcrockAndReservoirDepth,
     ConceptualGeometryTwoFractures,
     HeterogeneousPermeabilitySpecification,
+    HagenPoiseuilleWellPermeability,
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
     pp.models.solution_strategy.ContactIndicators,

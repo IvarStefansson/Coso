@@ -274,6 +274,68 @@ class FluidExtensions:
         return rho
 
 
+class HagenPoiseuilleWellPermeability:
+    """Mixin that replaces the Hagen-Poiseuille permeability for well subdomains.
+
+    For 1-D well grids the permeability is set according to the Hagen-Poiseuille
+    law for laminar pipe flow:
+
+    .. math::
+        k = r_w^2 / 8
+
+    where :math:`r_w` is the well radius (``self.solid.well_radius``). All other
+    intersection subdomains are handled by the parent class.
+
+    """
+
+    def intersection_permeability(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Permeability for intersection subdomains [m^2].
+
+        Well subdomains receive the Hagen-Poiseuille permeability; all others fall
+        back to the parent implementation. The two contributions are assembled via
+        subdomain projections, following the same pattern as
+        :meth:`~porepy.models.constitutive_laws.DimensionDependentPermeability.
+        permeability`.
+
+        Parameters:
+            subdomains: Intersection subdomains (dimension < nd - 1).
+
+        Returns:
+            Cell-wise permeability operator [m^2].
+
+        """
+        if len(subdomains) == 0:
+            return super().intersection_permeability(subdomains)
+
+        projection = pp.ad.SubdomainProjections(subdomains, dim=9)
+        wells = [sd for sd in subdomains if self.is_well_grid(sd)]
+        non_wells = [sd for sd in subdomains if not self.is_well_grid(sd)]
+
+        # solid.well_radius is already in model units (same convention as
+        # solid.permeability used in ConstantPermeability).
+        r_w = self.solid.well_radius
+        well_perm_scalar = r_w**2 / 8.0
+
+        permeability = pp.wrap_as_dense_ad_array(
+            0,
+            size=sum(sd.num_cells for sd in subdomains),
+            name="intersection_permeability",
+        )
+        if len(wells) > 0:
+            well_perm = pp.ad.Scalar(
+                well_perm_scalar, "hagen_poiseuille_well_permeability"
+            )
+            well_tensor = self.isotropic_second_order_tensor(wells, well_perm)
+            permeability = (
+                permeability + projection.cell_prolongation(wells) @ well_tensor
+            )
+        if len(non_wells) > 0:
+            permeability = permeability + projection.cell_prolongation(
+                non_wells
+            ) @ super().intersection_permeability(non_wells)
+        return permeability
+
+
 class PhysicalModel(
     # CosoBackgroundValues,
     pp.constitutive_laws.GravityForce,
