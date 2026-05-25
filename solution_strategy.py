@@ -119,7 +119,7 @@ class SolutionStrategy(FluxDiscretization):
 
         """
         super().update_discretization_parameters()
-        inverter = self.params.get("mpfa_inverter", "python")
+        inverter = self.params.get("mpfa_inverter", "numba")
         for _, data in self.mdg.subdomains(return_data=True):
             pp.initialize_data(
                 data,

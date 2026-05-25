@@ -295,6 +295,9 @@ production_periods = [
     0.5,
     1.0,
 ]  # In years
+SHUT_IN_DURATION = 3 * pp.DAY
+FINAL_TIME = 6 * pp.YEAR
+PRODUCTION_WELL = "2 Production well"
 if __name__ == "__main__":
     tp = True
     copy_plots = False

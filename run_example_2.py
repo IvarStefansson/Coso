@@ -53,7 +53,7 @@ from wells import WellDataConceptual
 
 LOG_TO_FILE = False
 log_dir = "example_2_logs"
-FINAL_TIME = 1 * pp.YEAR
+FINAL_TIME = 5 * pp.YEAR
 SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
 
@@ -91,7 +91,7 @@ class BaseModel(
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
-    # ConstraintsCapcrockAndReservoirDepth,
+    ConstraintsCapcrockAndReservoirDepth,
     ConceptualGeometryTwoFractures,
     HeterogeneousPermeabilitySpecification,
     pp.constitutive_laws.CubicLawPermeability,
@@ -347,7 +347,7 @@ def log_summary(velocity: float, period: float, with_production: bool):
 
 
 NUM_BINS_PER_INTERVAL = 4
-use_iterative_solver = False
+use_iterative_solver = True
 if use_iterative_solver and "pp_solvers" not in sys.modules:
     raise ImportError(
         "pp_solvers module is required for iterative solvers. Please install pp_solvers"
@@ -356,7 +356,7 @@ if use_iterative_solver and "pp_solvers" not in sys.modules:
 
 boundary_velocities = [
     0.0,
-    # 1.0e-6,
+    1.0e-6,
     2.0e-6,
     # 5.0e-6,
 ]
@@ -370,7 +370,7 @@ production_periods = [
 ]  # In years
 transition_duration = 2 * pp.HOUR
 INITIAL_SHUTIN_DURATION = (
-    SHUT_IN_DURATION  # short shut-in at t=0 to populate no-flow pressure cache
+    pp.DAY / 2  # short shut-in at t=0 to populate no-flow pressure cache
 )
 if __name__ == "__main__":
     tp = True
