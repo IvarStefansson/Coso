@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../workdir/porepy"
+		},
+		{
+			"path": "../pp_solvers"
 		}
 	],
 	"settings": {},
