@@ -146,7 +146,7 @@ if __name__ == "__main__":
     )
     granodiorite_values["permeability"] = 2e-16
     granodiorite_values["residual_aperture"] = 1.0e-3
-    granodiorite_values["dilation_angle"] = 0 # np.deg2rad(1)
+    granodiorite_values["dilation_angle"] = 0  # np.deg2rad(1)
     granodiorite_values["porosity"] = 0.02
 
     init_granodiorite_values = copy.deepcopy(granodiorite_values)
@@ -181,7 +181,6 @@ if __name__ == "__main__":
                 schedule = np.array(
                     [
                         0,
-
                         pp.HOUR,
                         # pp.DAY,  # Initial period of stabilization and pressure ramp-up
                         1 * production_period - shut_in_duration,  # First shut-in
@@ -284,8 +283,12 @@ if __name__ == "__main__":
                 production_pressures = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
 
                 # production_pressures = 0.5 * pp.ATMOSPHERIC_PRESSURE
-                injection_temperatures = np.full(schedule.shape, pp.Celsius_to_Kelvin(10))
-                production_temperatures = np.full(schedule.shape, pp.Celsius_to_Kelvin(150))
+                injection_temperatures = np.full(
+                    schedule.shape, pp.Celsius_to_Kelvin(10)
+                )
+                production_temperatures = np.full(
+                    schedule.shape, pp.Celsius_to_Kelvin(150)
+                )
                 # Can be refined to have different schedules for each well.
                 for name in MainModel.injection_well_names.fget(None):
                     model_params[f"{name}_pressures"] = injection_pressures
@@ -309,7 +312,7 @@ if __name__ == "__main__":
 
                 init_model = InitializationModel(model_params_init)
 
-                pp.run_time_dependent_model(init_model, solver_params)
+                pp.ModelRunner(init_model, solver_params).run()
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
                 traction = init_model.evaluate_and_scale(
@@ -353,7 +356,7 @@ if __name__ == "__main__":
                         "nl_convergence_tol_res": 1e0,
                     }
                 )
-                pp.run_time_dependent_model(model, solver_params)
+                pp.ModelRunner(model, solver_params).run()
                 model.plot_well_monitoring()
                 toc = time.time()
                 logger.info(

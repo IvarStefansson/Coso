@@ -500,7 +500,7 @@ if __name__ == "__main__":
                 init_model = initialization_class(model_params_init)
 
                 t0_init = time.perf_counter()
-                pp.run_time_dependent_model(init_model, solver_params)
+                pp.ModelRunner(init_model, solver_params).run()
                 t1_init = time.perf_counter()
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
@@ -555,7 +555,7 @@ if __name__ == "__main__":
                     }
                 )
                 t0_main = time.perf_counter()
-                pp.run_time_dependent_model(model, solver_params)
+                pp.ModelRunner(model, solver_params).run()
                 t1_main = time.perf_counter()
                 slip_onset_times[simulation_name] = model.slip_onset_times()
                 simulation_summaries.append(

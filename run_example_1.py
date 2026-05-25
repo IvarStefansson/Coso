@@ -298,7 +298,7 @@ if __name__ == "__main__":
         },
         "linear_solver": "scipy_sparse",
     }
-    pp.run_time_dependent_model(init_model, solver_params)
+    pp.ModelRunner(init_model, solver_params).run()
     init_model.fracture_gap(init_model.mdg.subdomains(dim=2))
     model = CopyModel(model_params)
     model.initialization_model = init_model
@@ -309,5 +309,5 @@ if __name__ == "__main__":
             "nl_convergence_tol_res": 5e0,
         }
     )
-    pp.run_time_dependent_model(model, solver_params)
+    pp.ModelRunner(model, solver_params).run()
     model.plot_well_monitoring()

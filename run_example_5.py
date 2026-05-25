@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
             init_model = InitializationModel(model_params_init)
 
-            pp.run_time_dependent_model(init_model, solver_params)
+            pp.ModelRunner(init_model, solver_params).run()
             # Analyze the initialization results to set friction coefficient
             sds = init_model.mdg.subdomains(dim=2)
             traction = init_model.evaluate_and_scale(
@@ -296,5 +296,5 @@ if __name__ == "__main__":
                     "nl_convergence_tol_res": 1e0,
                 }
             )
-            pp.run_time_dependent_model(model, solver_params)
+            pp.ModelRunner(model, solver_params).run()
             model.plot_well_monitoring()
