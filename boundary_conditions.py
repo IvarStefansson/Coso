@@ -403,7 +403,7 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
         if self.is_well_grid(sd) and "darcy_fluxes" in self.well_protocol_variables():
             well = self.well_network.wells[sd.tags["parent_well_index"]]
             well_tag = well.tags["well_name"]
-            protocol = self.well_protocols()[well_tag]
+            values = self.well_protocols(well_tag, "darcy_fluxes")
             # Find indices of the well boundary sides.
             domain_sides = self.domain_boundary_sides(bg)
             # The top of the domain is '.top' in 3d, '.north' in 2d.
@@ -411,7 +411,7 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
             # Set pressure values according to the well protocol.
             values[inds] = self.units.convert_units(
                 self.get_well_value(
-                    protocol["darcy_fluxes"],
+                    values,
                     self.time_manager.schedule,
                     self.time_manager.time,
                 ),
@@ -434,7 +434,7 @@ class OnlyInjectionWellNeumannBCsFromSchedule(NeumannWellBCsFromSchedule):
         is_injection = well.tags["well_name"] in self.injection_well_names
         return super().neumann_bcs_active(sd) and is_injection
 
-    def well_protocols(self) -> dict[str, dict[str, NDArray[np.float64]]]:
+    def well_protocols(self, well_tag: str, variable: str) -> NDArray[np.float64]:
         """Dictionary mapping well tags to well protocols.
 
         Returns:
@@ -444,35 +444,30 @@ class OnlyInjectionWellNeumannBCsFromSchedule(NeumannWellBCsFromSchedule):
         """
         num_times = self.time_manager.schedule.size
         protocols: dict[str, dict[str, NDArray[np.float64]]] = {}
-        # Construct protocols for each well.
-        for well_tag in self.well_names:
-            # Initialize protocol dictionary for the well.
-            protocols[well_tag] = {}
-            # Set values for temperatures and pressures.
-            for variable in self.well_protocol_variables():
-                input_values = self.params.get(f"{well_tag}_{variable}", 0.0)
-                if isinstance(input_values, (float, int)):
-                    # Broadcast single value to all time steps for convenient user
-                    # definition of well protocols.
-                    values = np.full(num_times, input_values, dtype=float)
+        # Initialize protocol dictionary for the well.
+        protocols[well_tag] = {}
+        # Set values for temperatures and pressures.
+        input_values = self.params.get(f"{well_tag}_{variable}", 0.0)
+        if isinstance(input_values, (float, int)):
+            # Broadcast single value to all time steps for convenient user
+            # definition of well protocols.
+            values = np.full(num_times, input_values, dtype=float)
 
-                elif isinstance(input_values, (list, np.ndarray)):
-                    # Enforce array of float values.
-                    values = np.array(input_values, dtype=float)
-                    if values.size != num_times:
-                        raise ValueError(
-                            f"Well protocol for {well_tag} {variable} has size "
-                            f"{values.size}, expected {num_times}."
-                        )
-                else:
-                    raise TypeError(
-                        f"Well protocol for {well_tag} {variable} has unsupported "
-                        f"type {type(input_values)}."
-                    )
-                # Populate well dictionary for the current variable.
-                protocols[well_tag][variable] = values
+        elif isinstance(input_values, (list, np.ndarray)):
+            # Enforce array of float values.
+            values = np.array(input_values, dtype=float)
+            if values.size != num_times:
+                raise ValueError(
+                    f"Well protocol for {well_tag} {variable} has size "
+                    f"{values.size}, expected {num_times}."
+                )
+        else:
+            raise TypeError(
+                f"Well protocol for {well_tag} {variable} has unsupported "
+                f"type {type(input_values)}."
+            )
 
-        return protocols
+        return values
 
 
 class SmoothWellTransitions(NeumannWellBCsFromSchedule):

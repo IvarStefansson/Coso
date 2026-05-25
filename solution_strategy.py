@@ -6,8 +6,7 @@ from functools import partial
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-from porepy.applications.discretizations.flux_discretization import \
-    FluxDiscretization
+from porepy.applications.discretizations.flux_discretization import FluxDiscretization
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +143,7 @@ class Foo:
         # not locked. Should always be zero during the first time step, then zero during
         # the first iteration, and then increase with the number of iterations.
         self.fracture_locking_variable.set_value(
-            self.nonlinear_solver_statistics.num_iteration
+            self.nonlinear_solver_statistics.num_iterations
             * (self.time_manager.time_index > 1)
         )
 
