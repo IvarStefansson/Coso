@@ -299,9 +299,9 @@ def names_from_params(velocity: float, period: float, with_production: bool):
     folder_name = "Case_II/" + simulation_name
     folder_name_init = folder_name + "_initialization"
     file_name = "example_2"
-    prod_label = "" if with_production else ", no injection"
-    title = f", Strain rate = {velocity:.1e} m/y{prod_label}, "
-    title = title[0].upper() + title[1:]
+    prod_label = "with production" if with_production else ", no production"
+    title = f"Strain rate = {velocity:.1g} m/y, {prod_label}"
+    # title = title[0].upper() + title[1:]
     return simulation_name, folder_name, folder_name_init, file_name, title
 
 

@@ -96,16 +96,16 @@ def _flux_vector_to_magnitude(sd_data: dict) -> np.ndarray:
 
 PVD_QUANTITIES: list[Panel | tuple[str, str]] = [
     # ("temperature", "Avg. temperature (K)"),
-    Panel(
-        "Fluid flux magnitude (kg/(m²·s))",
-        [
-            Quantity(
-                "fluid_flux_magnitude",
-                inputs=["fluid_flux_vector"],
-                fn=_flux_vector_to_magnitude,
-            )
-        ],
-    ),
+    # Panel(  Fracture flux!
+    #     "Fluid flux magnitude (kg/(m²·s))",
+    #     [
+    #         Quantity(
+    #             "fluid_flux_magnitude",
+    #             inputs=["fluid_flux_vector"],
+    #             fn=_flux_vector_to_magnitude,
+    #         )
+    #     ],
+    # ),
     Panel(
         "Slip tendency (−)",
         [
@@ -130,9 +130,10 @@ PVD_QUANTITIES: list[Panel | tuple[str, str]] = [
         "Critical pressure for slip (Pa)",
         [
             Quantity(
-                "p_crit",
+                "min",
                 inputs=["contact_traction_in_Pa", "slip_tendency"],
                 fn=_critical_pressure,
+                spatial_fn=np.nanmin,
             ),
         ],
     ),
@@ -287,7 +288,7 @@ def make_case2_plots(
                         panels=frac_panels,
                         intervals=intervals,
                         n_bins=n_bins,
-                        title=f"{title} — {frac_name}",
+                        title=title,  # f"{title} — {frac_name}",
                         out_path=frac_out,
                     )
 

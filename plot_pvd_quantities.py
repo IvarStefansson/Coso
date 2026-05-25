@@ -649,15 +649,15 @@ def plot_broken_axis_panels(
                 linewidth=1.5,
                 marker=s.get("marker", "o"),
                 markersize=s.get("markersize", 3),
-                label=label if len(rp.data) > 1 else None,
+                label=label,  # if len(rp.data) > 1 else None,
             )
         ax.set_ylabel(rp.ylabel, fontsize=8)
-        if len(rp.data) > 1:
-            ax.legend(fontsize=7, loc="upper left")
+        # if len(rp.data) > 1:
+        ax.legend(fontsize=7, loc="upper left")
 
     if title:
         fig.suptitle(title, fontsize=11)
-    fig.tight_layout()
+    # fig.tight_layout()
 
     if out_path is not None:
         out_path = Path(out_path)
