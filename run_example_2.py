@@ -53,7 +53,7 @@ from wells import WellDataConceptual
 
 LOG_TO_FILE = False
 log_dir = "example_2_logs"
-FINAL_TIME = 5 * pp.YEAR
+FINAL_TIME = 2 * pp.YEAR
 SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
 
@@ -91,7 +91,7 @@ class BaseModel(
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
-    ConstraintsCapcrockAndReservoirDepth,
+    # ConstraintsCapcrockAndReservoirDepth,
     ConceptualGeometryTwoFractures,
     HeterogeneousPermeabilitySpecification,
     pp.constitutive_laws.CubicLawPermeability,
@@ -356,13 +356,13 @@ if use_iterative_solver and "pp_solvers" not in sys.modules:
 
 boundary_velocities = [
     0.0,
-    1.0e-6,
-    2.0e-6,
+    # 1.0e-6,
+    # 2.0e-6,
     # 5.0e-6,
 ]
 with_production = [
     True,
-    False,
+    # False,
 ]
 production_periods = [
     # 0.5,
@@ -388,7 +388,7 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 4.0e3
                 fracture_size = 5e2
-                refinement = 0.5 if use_iterative_solver else 0.80
+                refinement = 0.65 if use_iterative_solver else 0.65
                 cell_size = 10e2 * refinement
                 cell_size_fracture = 0.6 * fracture_size * refinement
 

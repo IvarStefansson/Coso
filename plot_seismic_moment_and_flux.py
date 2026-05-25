@@ -79,7 +79,9 @@ def bin_moment_rate(
     Returns ``(bin_edges, rates)`` where ``rates`` has length ``n_bins``.
     """
     df = frac_df[frac_df["fracture_id"] == fracture_id]
-    times, jumps = _monotone(df["time"].values, df["seismic_moment"].values)
+    times, raw_moment = _monotone(df["time"].values, df["seismic_moment"].values)
+    # Remove numerical noise in moment values.
+    moment = np.clip(raw_moment, a_min=1e-5, a_max=None)
     bin_edges = np.linspace(t_start, t_end, n_bins + 1)
     rates = np.full(n_bins, np.nan)
     for k in range(n_bins):
@@ -88,7 +90,7 @@ def bin_moment_rate(
         # the rate across the bin.  The bin edges coincide with schedule checkpoints,
         # so t0 and t1 are always present in the data.
         mask = (times >= t0) & (times <= t1)
-        t_bin, v_bin = times[mask], jumps[mask]
+        t_bin, v_bin = times[mask], moment[mask]
         dt_bin = t_bin[-1] - t_bin[0] if len(t_bin) >= 2 else 0.0
         if len(t_bin) >= 2 and dt_bin > 0:
             rates[k] = (v_bin[-1] - v_bin[0]) / dt_bin
