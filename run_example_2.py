@@ -301,7 +301,7 @@ def create_schedule(
 def names_from_params(velocity: float, period: float, with_production: bool):
     prod_suffix = "" if with_production else "_no_production"
     simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}{prod_suffix}"
-    folder_name = "Case_II/" + simulation_name
+    folder_name = "Case_II_direct_solver/" + simulation_name
     folder_name_init = folder_name + "_initialization"
     file_name = "example_2"
     prod_label = "with production" if with_production else ", no production"
@@ -352,7 +352,7 @@ def log_summary(velocity: float, period: float, with_production: bool):
 
 
 NUM_BINS_PER_INTERVAL = 4
-use_iterative_solver = True
+use_iterative_solver = False
 if use_iterative_solver and "pp_solvers" not in sys.modules:
     raise ImportError(
         "pp_solvers module is required for iterative solvers. Please install pp_solvers"
@@ -370,7 +370,7 @@ with_production = [
     False,
 ]
 production_periods = [
-    0.5,
+    # 0.5,
     1.0,
 ]  # In years
 transition_duration = 2 * pp.HOUR
@@ -393,7 +393,7 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 4.0e3
                 fracture_size = 5e2
-                refinement = 0.4 if use_iterative_solver else 0.65
+                refinement = 0.5 if use_iterative_solver else 0.8
                 cell_size = 10e2 * refinement
                 cell_size_fracture = 0.6 * fracture_size * refinement
 
