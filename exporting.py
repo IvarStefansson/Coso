@@ -690,10 +690,12 @@ class CosoExporter:
             traction_pa, friction_coefficient
         )
         frac_pressure = self.evaluate_and_scale(fracs, "pressure", "Pa")
-        G = self.solid.shear_modulus
+        G = self.units.convert_units(self.solid.shear_modulus, "Pa", to_si=True)
         for id, sd in enumerate(fracs):
             key = self.fracture_names()[sd.frac_num]
-            cell_vols = fracs[id].cell_volumes
+            cell_vols = self.units.convert_units(
+                fracs[id].cell_volumes, f"m^{self.nd - 1}", to_si=True
+            )
             cell_jump = jump_norm[cell_offsets[id] : cell_offsets[id + 1]]
             total_slip_x_area = ConvergenceAnalysis.lp_norm(cell_jump, cell_vols, p=1)
             data[key] = {
