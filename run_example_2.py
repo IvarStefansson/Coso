@@ -95,7 +95,7 @@ class BaseModel(
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
-    ConstraintsCapcrockAndReservoirDepth,
+    # ConstraintsCapcrockAndReservoirDepth,
     ConceptualGeometryTwoFractures,
     HeterogeneousPermeabilitySpecification,
     HagenPoiseuilleWellPermeability,
@@ -380,7 +380,7 @@ production_periods = [
     # 0.5,
     1.0,
 ]  # In years
-transition_duration = 2 * pp.HOUR
+transition_duration = 3 * pp.HOUR
 INITIAL_SHUTIN_DURATION = (
     pp.DAY / 2  # short shut-in at t=0 to populate no-flow pressure cache
 )
@@ -400,7 +400,7 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 4.0e3
                 fracture_size = 5e2
-                refinement = 0.5 if use_iterative_solver else 0.8
+                refinement = 1.7 if USE_ITERATIVE_SOLVER else 0.8
                 cell_size = 10e2 * refinement
                 cell_size_fracture = 0.6 * fracture_size * refinement
 

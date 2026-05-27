@@ -362,10 +362,9 @@ class PhysicalModel(
         """
         # Inherit poromechanical porosity from base class.
         phi = super().matrix_porosity(subdomains)
-        f_max = pp.ad.Function(pp.ad.maximum, "maximum_function")
-        f_max.set_name("max for porosity")
+        f_max = pp.ad.Function(pp.ad.maximum, "max for porosity")
         eps = 1e-8
         lower_bounded = f_max(phi, pp.ad.Scalar(eps))
         m = pp.ad.Scalar(-1)
-        both_bounded = m * f_max(phi * m, pp.ad.Scalar(eps - 1))
+        both_bounded = m * f_max(lower_bounded * m, pp.ad.Scalar(eps - 1))
         return both_bounded
