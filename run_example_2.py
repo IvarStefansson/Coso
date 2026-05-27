@@ -298,10 +298,17 @@ def create_schedule(
     return schedule, neumann_intervals
 
 
-def names_from_params(velocity: float, period: float, with_production: bool):
+def names_from_params(
+    velocity: float, period: float, with_production: bool, use_iterative_solver: bool
+):
     prod_suffix = "" if with_production else "_no_production"
     simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}{prod_suffix}"
-    folder_name = "Case_II_direct_solver/" + simulation_name
+    # While debugging iterative solvers, distinguish to avoid overwriting the production
+    # runs with direct solvers.
+    if use_iterative_solver:
+        folder_name = "Case_II/" + simulation_name
+    else:
+        folder_name = "Case_II_direct_solver/" + simulation_name
     folder_name_init = folder_name + "_initialization"
     file_name = "example_2"
     prod_label = "with production" if with_production else ", no production"
@@ -352,8 +359,8 @@ def log_summary(velocity: float, period: float, with_production: bool):
 
 
 NUM_BINS_PER_INTERVAL = 4
-use_iterative_solver = False
-if use_iterative_solver and "pp_solvers" not in sys.modules:
+USE_ITERATIVE_SOLVER = True
+if USE_ITERATIVE_SOLVER and "pp_solvers" not in sys.modules:
     raise ImportError(
         "pp_solvers module is required for iterative solvers. Please install pp_solvers"
         + " or set use_iterative_solver to False."
@@ -411,7 +418,7 @@ if __name__ == "__main__":
                 solid_values_local = copy.deepcopy(granodiorite_values)
                 solid_values_init = copy.deepcopy(solid_values_local)
                 simulation_name, folder_name, folder_name_init, file_name, title = (
-                    names_from_params(velocity, period, with_prod)
+                    names_from_params(velocity, period, with_prod, USE_ITERATIVE_SOLVER)
                 )
                 if copy_plots:
                     # Copy the plots from previous runs to the new folder for comparison.
@@ -487,7 +494,7 @@ if __name__ == "__main__":
                         model_params[f"{name}_temperatures"] = production_t
 
                 initialization_class = InitializationModel
-                if use_iterative_solver:
+                if USE_ITERATIVE_SOLVER:
                     initialization_class = add_mixin(
                         pp_solvers.IterativeSolverMixin, InitializationModel
                     )
@@ -539,7 +546,7 @@ if __name__ == "__main__":
                     }
                 )
                 model_class = MainModel
-                if use_iterative_solver:
+                if USE_ITERATIVE_SOLVER:
                     model_class = add_mixin(pp_solvers.IterativeSolverMixin, MainModel)
                     model_params["linear_solver"] = {
                         "preconditioner_factory": pp_solvers.thm_factory
@@ -557,7 +564,6 @@ if __name__ == "__main__":
                 t0_main = time.perf_counter()
                 pp.ModelRunner(model, solver_params).run()
                 t1_main = time.perf_counter()
-                slip_onset_times[simulation_name] = model.slip_onset_times()
                 simulation_summaries.append(
                     {
                         "name": simulation_name,
