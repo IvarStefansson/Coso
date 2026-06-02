@@ -57,7 +57,7 @@ from wells import WellDataConceptual
 
 LOG_TO_FILE = False
 log_dir = "example_2_logs"
-FINAL_TIME = 3 * pp.YEAR
+FINAL_TIME = 5 * pp.YEAR
 SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
 
@@ -306,7 +306,7 @@ def names_from_params(
     # While debugging iterative solvers, distinguish to avoid overwriting the production
     # runs with direct solvers.
     if use_iterative_solver:
-        folder_name = "Case_II/" + simulation_name
+        folder_name = "Case_II_applied/" + simulation_name  # volstress
     else:
         folder_name = "Case_II_direct_solver/" + simulation_name
     folder_name_init = folder_name + "_initialization"
@@ -335,8 +335,8 @@ def time_managers(schedule: np.ndarray, dt: float, production_period: float):
         rtol=1e-20,  # Low rtol due to large time values.
         atol=1e-5,
     )
-    # 5e9 s ≈ 158 years, which is safely below the production period for all cases.
-    dt_init = 5e9
+    # 5e10 s ≈ 1580 years, which is safely below the production period for all cases.
+    dt_init = 5e10
     time_manager_init = TimeManager(
         schedule=[0, 3 * dt_init],
         dt_init=dt_init,
@@ -367,14 +367,14 @@ if USE_ITERATIVE_SOLVER and "pp_solvers" not in sys.modules:
     )
 
 boundary_velocities = [
-    0.0,
+    # 0.0,
     1.0e-6,
-    2.0e-6,
+    # 2.0e-6,
     # 5.0e-6,
 ]
 with_production = [
     True,
-    False,
+    # False,
 ]
 production_periods = [
     # 0.5,
@@ -400,7 +400,7 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 4.0e3
                 fracture_size = 5e2
-                refinement = 0.5 if use_iterative_solver else 0.8
+                refinement = 0.5 if USE_ITERATIVE_SOLVER else 0.8
                 cell_size = 10e2 * refinement
                 cell_size_fracture = 0.6 * fracture_size * refinement
 
