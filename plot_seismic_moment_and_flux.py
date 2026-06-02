@@ -11,6 +11,9 @@ import run_example_4
 
 CASES_TO_PLOT = [2]
 
+# N·m; clip moment values below this to remove numerical noise in moment rate
+SEISMIC_MOMENT_NOISE_TOL = 1e-2
+
 
 def get_intervals(
     production_period: float,
@@ -81,20 +84,21 @@ def bin_moment_rate(
     df = frac_df[frac_df["fracture_id"] == fracture_id]
     times, raw_moment = _monotone(df["time"].values, df["seismic_moment"].values)
     # Remove numerical noise in moment values.
-    moment = np.clip(raw_moment, a_min=1e-5, a_max=None)
+    moment = np.clip(raw_moment, a_min=SEISMIC_MOMENT_NOISE_TOL, a_max=None)
     bin_edges = np.linspace(t_start, t_end, n_bins + 1)
     rates = np.full(n_bins, np.nan)
     for k in range(n_bins):
         t0, t1 = bin_edges[k], bin_edges[k + 1]
-        # Inclusive on both sides: we need the value at t0 as well as t1 to compute
-        # the rate across the bin.  The bin edges coincide with schedule checkpoints,
-        # so t0 and t1 are always present in the data.
-        mask = (times >= t0) & (times <= t1)
-        t_bin, v_bin = times[mask], moment[mask]
-        dt_bin = t_bin[-1] - t_bin[0] if len(t_bin) >= 2 else 0.0
-        if len(t_bin) >= 2 and dt_bin > 0:
-            rates[k] = (v_bin[-1] - v_bin[0]) / dt_bin
-        elif len(t_bin) >= 1:
+        # Strict left inequality: each per-step moment increment belongs to the bin
+        # that ends at that time step. The right edge is inclusive so the checkpoint
+        # at t1 is captured in this bin.
+        left = times > t0 if k > 0 or t_start > 0 else times >= t0
+        mask = left & (times <= t1)
+        v_bin = moment[mask]
+        dt_bin = t1 - t0
+        if len(v_bin) >= 1:
+            rates[k] = np.sum(v_bin) / dt_bin
+        else:
             rates[k] = 0.0
     return bin_edges, rates
 
@@ -385,9 +389,12 @@ def plot_seismic_moment_and_flux(
         ax1.set_yscale("symlog", linthresh=linthresh)
     else:
         # Clip non-positive values to the smallest positive value so log works.
-        all_positive = np.concatenate(
-            [v[v > 0] for v in all_moment_rate.values() if np.any(v > 0)]
-        )
+        if np.any([np.any(v > 0) for v in all_moment_rate.values()]):
+            all_positive = np.concatenate(
+                [v[v > 0] for v in all_moment_rate.values() if np.any(v > 0)]
+            )
+        else:
+            all_positive = np.zeros(0)
         floor = float(all_positive.min()) if all_positive.size else 1.0
         for fid in fracture_ids:
             all_moment_rate[fid] = np.where(
@@ -504,7 +511,12 @@ if __name__ == "__main__":
                 for period in run_example_2.production_periods:
                     production_period = period * pp.YEAR
                     simulation_name, folder_name, _, file_name, title = (
-                        run_example_2.names_from_params(velocity, period, with_prod)
+                        run_example_2.names_from_params(
+                            velocity,
+                            period,
+                            with_prod,
+                            run_example_2.USE_ITERATIVE_SOLVER,
+                        )
                     )
                     csv_dir = Path(folder_name + "_saved_data") / "well_monitoring"
                     if not (csv_dir / f"{file_name}_fractures.csv").exists():

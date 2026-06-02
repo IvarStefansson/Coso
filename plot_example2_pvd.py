@@ -33,7 +33,6 @@ from plot_pvd_quantities import (
 # Configuration
 # ---------------------------------------------------------------------------
 
-NUM_BINS_PER_INTERVAL = 4
 # Fracture IDs present in Case II.
 FRACTURE_IDS = ["Injection", "Production"]
 # Output directory for saved figures.
@@ -150,7 +149,7 @@ FRACTURE_DIM: int = 2
 
 def make_case2_plots(
     fracture_ids: list[str] = FRACTURE_IDS,
-    num_bins_per_interval: int = NUM_BINS_PER_INTERVAL,
+    num_bins_per_interval: int = run_example_2.NUM_BINS_PER_INTERVAL,
     shut_in_duration: float = run_example_2.SHUT_IN_DURATION,
     pvd_quantities: list[Panel | tuple[str, str]] = PVD_QUANTITIES,
     fracture_subdomain_ids: dict[int, str] | None = None,
@@ -189,7 +188,9 @@ def make_case2_plots(
             for period in run_example_2.production_periods:
                 production_period = period * pp.YEAR
                 simulation_name, folder_name, _, file_name, title = (
-                    run_example_2.names_from_params(velocity, period, with_prod)
+                    run_example_2.names_from_params(
+                        velocity, period, with_prod, run_example_2.USE_ITERATIVE_SOLVER
+                    )
                 )
 
                 pvd_dir = Path(folder_name)
