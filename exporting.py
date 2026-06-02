@@ -613,7 +613,6 @@ class CosoExporter:
         face_offsets = np.cumsum([0] + [sd.num_faces for sd in sds])
         cell_offsets = np.cumsum([0] + [sd.num_cells for sd in sds])
         pressure_trace = self.evaluate_and_scale(sds, "pressure_trace", "Pa")
-        pressure = self.evaluate_and_scale(sds, "pressure", "Pa")
 
         has_t = hasattr(self, "temperature_trace")
         if has_t:
@@ -669,11 +668,21 @@ class CosoExporter:
                 )
         fracs = self.mdg.subdomains(dim=self.nd - 1)
         cell_offsets = np.cumsum([0] + [sd.num_cells for sd in fracs])
+        nd_vec_to_tangential = self.tangential_component(fracs)
 
-        displacement_jump = self.evaluate_and_scale(
-            fracs, "displacement_jump", "m"
-        ).reshape((self.nd, -1), order="F")
-        jump_norm = np.linalg.norm(displacement_jump, axis=0)
+        u_t: pp.ad.Operator = nd_vec_to_tangential @ self.plastic_displacement_jump(
+            fracs
+        )
+        # The time increment of the tangential displacement jump
+        u_t_increment: pp.ad.Operator = pp.ad.time_increment(u_t)
+        displacement_jump_increment = self.units.convert_units(
+            u_t_increment.value(self.equation_system).reshape(
+                (self.nd - 1, -1), order="F"
+            ),
+            "m",
+            to_si=True,
+        )
+        jump_norm = np.linalg.norm(displacement_jump_increment, axis=0)
         friction_coefficient = self.evaluate_and_scale(
             fracs, "friction_coefficient", ""
         )
@@ -699,8 +708,8 @@ class CosoExporter:
             cell_jump = jump_norm[cell_offsets[id] : cell_offsets[id + 1]]
             total_slip_x_area = ConvergenceAnalysis.lp_norm(cell_jump, cell_vols, p=1)
             data[key] = {
-                "displacement_jump": total_slip_x_area / np.sum(cell_vols),
                 "seismic_moment": G * total_slip_x_area,
+                "displacement_jump_increment": total_slip_x_area / np.sum(cell_vols),
             }
             data[key]["slip_tendency"] = np.nanmean(
                 slip_tendency[cell_offsets[id] : cell_offsets[id + 1]]
