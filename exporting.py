@@ -514,6 +514,35 @@ class CosoExporter:
         """
         data = super().data_to_export()
         for sd in self.mdg.subdomains():
+            # Initial p, T and u
+            data.append(
+                (
+                    sd,
+                    "initial_pressure",
+                    self.units.convert_units(
+                        self.ic_values_pressure(sd), "Pa", to_si=True
+                    ),
+                )
+            )
+            data.append(
+                (
+                    sd,
+                    "initial_temperature",
+                    self.units.convert_units(
+                        self.ic_values_temperature(sd), "K", to_si=True
+                    ),
+                )
+            )
+            data.append(
+                (
+                    sd,
+                    "initial_displacement",
+                    self.units.convert_units(
+                        self.ic_values_displacement(sd), "m", to_si=True
+                    ),
+                )
+            )
+
             tensor = self.evaluate_and_scale([sd], "permeability", "m ^ 2")
             perm = tensor.reshape(9, -1, order="F")
             data.append((sd, "permeability_tensor", perm[0]))
@@ -587,6 +616,11 @@ class CosoExporter:
                 else:
                     cell_flux = np.zeros((self.nd, sd.num_cells))
                 data.append((sd, "fluid_flux_vector", cell_flux.ravel("F")))
+            if sd.dim == self.nd + 1:  # Suppressed for now.
+                mech_stress, p_stress, t_stress = self.compute_volumetric_stresses(sd)
+                data.append((sd, "mechanical_stress", mech_stress))
+                data.append((sd, "pore_pressure_stress", p_stress))
+                data.append((sd, "total_stress", t_stress))
         for sd in self.mdg.subdomains():
             if not self.is_well_grid(sd):
                 data.append((sd, "well_name", np.full(sd.num_cells, -1)))
@@ -595,6 +629,19 @@ class CosoExporter:
                 well_tag = int(well.tags["well_name"][:2])
                 data.append((sd, "well_name", np.full(sd.num_cells, well_tag)))
         return data
+
+    def compute_volumetric_stresses(
+        self, sd: pp.Grid
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Compute volumetric mechanical, pore pressure, and temperature stresses for an nd grid."""
+        # WIP
+        if not sd.dim == self.nd:
+            raise ValueError("Volumetric stresses can only be computed for nd grids.")
+        K = self.evaluate_and_scale([sd], "bulk_modulus", "Pa")
+        mech_stress = self.evaluate_and_scale([sd], "displacement_divergence", "-") * K
+        p_stress = self.evaluate_and_scale([sd], "pressure_stress", "Pa")
+        T_stress = self.evaluate_and_scale([sd], "thermal_stress", "Pa")
+        return mech_stress, p_stress, T_stress
 
     def collect_data(self) -> dict:
         """Collect data for well monitoring.
