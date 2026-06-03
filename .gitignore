@@ -10,3 +10,5 @@ visualization
 *.json
 *.txt
 *.pdf
+gmsh_frac_file.geo_unrolled
+gmsh_frac_file.geo_unrolled.xao
