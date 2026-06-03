@@ -421,7 +421,7 @@ if __name__ == "__main__":
                 solid_values_local = copy.deepcopy(granodiorite_values)
                 solid_values_init = copy.deepcopy(solid_values_local)
                 solid_values_init["permeability"] *= (
-                    1e4  # More permeable for faster equilibration during initialization.
+                    1e3  # More permeable for faster equilibration during initialization.
                 )
                 simulation_name, folder_name, folder_name_init, file_name, title = (
                     names_from_params(velocity, period, with_prod, USE_ITERATIVE_SOLVER)
@@ -490,6 +490,7 @@ if __name__ == "__main__":
                     injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
                     production_p = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
                     injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(10))
+                    # Approximately the expected production from temperature at depth:
                     production_t = np.full(schedule.shape, 373.15)
                     # Can be refined to have different schedules for each well.
                     for name in MainModel.injection_well_names.fget(None):
