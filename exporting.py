@@ -533,15 +533,16 @@ class CosoExporter:
                     ),
                 )
             )
-            data.append(
-                (
-                    sd,
-                    "initial_displacement",
-                    self.units.convert_units(
-                        self.ic_values_displacement(sd), "m", to_si=True
-                    ),
+            if sd.dim == self.nd:
+                data.append(
+                    (
+                        sd,
+                        "initial_displacement",
+                        self.units.convert_units(
+                            self.ic_values_displacement(sd), "m", to_si=True
+                        ),
+                    )
                 )
-            )
 
             tensor = self.evaluate_and_scale([sd], "permeability", "m ^ 2")
             perm = tensor.reshape(9, -1, order="F")
@@ -616,11 +617,18 @@ class CosoExporter:
                 else:
                     cell_flux = np.zeros((self.nd, sd.num_cells))
                 data.append((sd, "fluid_flux_vector", cell_flux.ravel("F")))
-            if sd.dim == self.nd + 1:  # Suppressed for now.
-                mech_stress, p_stress, t_stress = self.compute_volumetric_stresses(sd)
-                data.append((sd, "mechanical_stress", mech_stress))
-                data.append((sd, "pore_pressure_stress", p_stress))
-                data.append((sd, "total_stress", t_stress))
+            if sd.dim == self.nd:
+                data.append(
+                    (
+                        sd,
+                        "displacement_divergence",
+                        self.evaluate_and_scale([sd], "displacement_divergence", "-"),
+                    )
+                )
+                # mech_stress, p_stress, t_stress = self.compute_volumetric_stresses(sd)
+                # data.append((sd, "mechanical_stress", mech_stress))
+                # data.append((sd, "pore_pressure_stress", p_stress))
+                # data.append((sd, "total_stress", t_stress))
         for sd in self.mdg.subdomains():
             if not self.is_well_grid(sd):
                 data.append((sd, "well_name", np.full(sd.num_cells, -1)))
