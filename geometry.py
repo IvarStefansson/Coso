@@ -382,6 +382,45 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
             )
         )
 
+    def set_well_network(self) -> None:
+        """Assign well network class."""
+        if not self.params.get("use_wells", True):
+            return super().set_well_network()
+        dx = self.domain_sizes()[0] / 4
+        y_mid = self.domain_sizes()[1] / 2
+        z = -self.domain_sizes()[2]
+        x = self.domain_sizes()[0] / 8 * 3
+
+        x_prod = np.full((1, 3), x)
+        y_prod = np.array(
+            [
+                [
+                    y_mid + 2,
+                    y_mid - 1,
+                    self.params["production_well_y_endpoint"],
+                ]
+            ]
+        )
+        z_top = 0
+        z_prod = np.array([[z_top, z / 2, z / 2]])
+        pts_prod = np.vstack([x_prod, y_prod, z_prod])
+        # Create a well object.
+        well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
+        x_inj = np.full((1, 2), x + dx)
+        y_inj = np.array([[y_mid + 2, y_mid - 1]])
+        z_inj = np.array([[z_top, 3 / 4 * z]])
+        pts_inj = np.vstack([x_inj, y_inj, z_inj])
+        # Create a well object.
+        well_inj = pp.Well(
+            pts_inj, tags={"well_name": self.injection_well_names[0]}
+        )  # 68 20rd
+        wells = [well_inj, well_prod]
+        self.well_network = pp.WellNetwork3d(
+            domain=self._domain,
+            wells=wells,
+            parameters={"mesh_size": self.params["meshing_arguments"]["cell_size"] / 2},
+        )
+
 
 class ConstraintsCapcrockAndReservoirDepth:
     def set_fractures(self):
