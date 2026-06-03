@@ -386,23 +386,23 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
         """Assign well network class."""
         if not self.params.get("use_wells", True):
             return super().set_well_network()
+
         dx = self.domain_sizes()[0] / 4
         y_mid = self.domain_sizes()[1] / 2
         z = -self.domain_sizes()[2]
         x = self.domain_sizes()[0] / 8 * 3
 
-        x_prod = np.full((1, 3), x)
+        x_prod = np.full((1, 2), x)
         y_prod = np.array(
             [
                 [
                     y_mid + 2,
                     y_mid - 1,
-                    self.params["production_well_y_endpoint"],
                 ]
             ]
         )
         z_top = 0
-        z_prod = np.array([[z_top, z / 2, z / 2]])
+        z_prod = np.array([[z_top, 3 / 4 * z]])
         pts_prod = np.vstack([x_prod, y_prod, z_prod])
         # Create a well object.
         well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
@@ -424,7 +424,7 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
 
 class ConstraintsCapcrockAndReservoirDepth:
     def set_fractures(self):
-        """Keep first fracture and create second fracture at same y location but different x location."""
+        """Keep super fractures and add constraints."""
         # Call the parent class's set_fractures method
         super().set_fractures()
         # Set throughgoing fractures at the two depths
