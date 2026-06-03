@@ -166,22 +166,6 @@ class HeterogeneousPermeabilitySpecification:
         return zone_z
         # return np.logical_and.reduce((zone_x, zone_y, zone_z))
 
-    def caprock_depth(self) -> float:
-        """Depth of the caprock.
-
-        Returns:
-            Depth of the caprock in meters.
-        """
-        return self.params.get("caprock_depth", 1.1e3)
-
-    def reservoir_depth(self) -> float:
-        """Depth of the reservoir.
-
-        Returns:
-            Depth of the reservoir in meters.
-        """
-        return self.params.get("reservoir_depth", 3e3)
-
 
 class FluidExtensions:
     def viscosity_of_phase(

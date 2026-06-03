@@ -341,6 +341,22 @@ class ConceptualGeometry(TwoEllipticFractures3d):
 
 
 class ConceptualGeometryTwoFractures(ConceptualGeometry):
+    def caprock_depth(self) -> float:
+        """Depth of the caprock.
+
+        Returns:
+            Depth of the caprock in meters.
+        """
+        return self.params.get("caprock_depth", 1.1e3)
+
+    def reservoir_depth(self) -> float:
+        """Depth of the reservoir.
+
+        Returns:
+            Depth of the reservoir in meters.
+        """
+        return self.params.get("reservoir_depth", 3e3)
+
     def fracture_names(self) -> list[str]:
         return ["Fracture 1", "Fracture 2"]
 
