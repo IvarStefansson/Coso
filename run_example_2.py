@@ -20,6 +20,7 @@ from physical_model import (
     HeterogeneousPermeabilitySpecification,
     PhysicalModel,
     HagenPoiseuilleWellPermeability,
+    CosoBackgroundValues,
 )
 from diff_tpfa import DarcysLawAdEverywhere
 from time_manager import CosoTimeManager as TimeManager
@@ -130,6 +131,7 @@ class BaseModel(
 
 
 class InitializationModel(
+    CosoBackgroundValues,
     InitialConditionHydrostaticPressureValues,
     InitialConditionThermalGradientTemperatureValues,
     BoundaryConditionsMechanicsNeumann,
@@ -139,6 +141,7 @@ class InitializationModel(
 
 
 class MainModel(
+    CosoBackgroundValues,
     SmoothWellTransitions,
     NeumannWellBCsFromSchedule,
     CopyInitialCondition,
