@@ -464,7 +464,6 @@ if __name__ == "__main__":
                     "reference_variable_values": pp.ReferenceVariableValues(
                         temperature=pp.Celsius_to_Kelvin(50)
                     ),
-                    "thermal_gradient": 7e-2,
                     "fracture_file": "coords.txt",
                     "folder_name": folder_name_init,
                     "initialization": True,
@@ -483,13 +482,13 @@ if __name__ == "__main__":
                     "fourier_flux_discretization": "tpfa" if tp else "mpfa",
                     "use_ic_interpolation": True,
                     "boundary_displacement_velocity": velocity / pp.YEAR,
-                    "surface_temperature": pp.Celsius_to_Kelvin(30.0),
+                    "surface_temperature": pp.Celsius_to_Kelvin(20.0),
                 }
                 model_params = copy.deepcopy(model_params_init)
                 if with_prod:
                     injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
                     production_p = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
-                    injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(10))
+                    injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(20))
                     # Approximately the expected production from temperature at depth:
                     production_t = np.full(schedule.shape, 373.15)
                     # Can be refined to have different schedules for each well.
