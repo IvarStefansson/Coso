@@ -436,16 +436,16 @@ class ConstraintsCapcrockAndReservoirDepth:
             center = np.array(
                 [self.domain_sizes()[0] / 2, self.domain_sizes()[1] / 2, -z]
             )
-            self._fractures.append(
-                pp.EllipticFracture(
-                    center=center,
-                    strike_angle=np.pi / 4,
-                    dip_angle=np.pi / 2,
-                    major_axis=self.fracture_major_axes[0],
-                    minor_axis=self.fracture_minor_axes[0],
-                    major_axis_angle=0,
-                )
+            # z constant, x and y at domain corners
+            dx, dy = self.domain_sizes()[0] / 2, self.domain_sizes()[1] / 2
+            points = np.array(
+                [
+                    [center[0] - dx, center[0] + dx, center[0] + dx, center[0] - dx],
+                    [center[1] - dy, center[1] - dy, center[1] + dy, center[1] + dy],
+                    [-z, -z, -z, -z],
+                ]
             )
+            self._fractures.append(pp.PlaneFracture(points))
 
     def meshing_kwargs(self) -> dict:
         """Ensure the two additional fractures are marked as constraints for meshing."""
