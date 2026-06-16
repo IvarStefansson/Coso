@@ -7,6 +7,7 @@ import porepy as pp
 from porepy.applications.md_grids.model_geometries import TwoEllipticFractures3d
 
 from exporting import CosoExporter
+from fault_planes import apply_extensions, load_fault_planes
 from save_fracture_coords import easting_northing_offset_to_strike_angle_dip_angle
 from wells import WellDataConceptual, WellDataCoso
 
