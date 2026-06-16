@@ -1,8 +1,13 @@
 import sys
+import logging
+import os
 
 import numpy as np
 import pandas as pd
 import porepy as pp
+
+
+logger = logging.getLogger(__name__)
 
 
 class _WellDataBase:
@@ -181,6 +186,12 @@ class WellDataConceptual(_WellDataBase):
         well_network attribute of the class.
 
         """
+        if not self.params.get("read_well_operation_data", True):
+            return
+
+        if not self.params.get("use_wells", True):
+            return
+
         if len(self.well_network.wells) == 0:
             return
         psig2Pa = 6894.76
@@ -193,6 +204,13 @@ class WellDataConceptual(_WellDataBase):
         for well_type in ["injection", "production"]:
             pth = sys.path[0]
             fn = f"{pth}/Coso data/{well_type}.csv"
+            if not os.path.exists(fn):
+                logger.debug(
+                    "Well operation file %s not found. "
+                    "Continuing with schedule-imposed boundary conditions.",
+                    fn,
+                )
+                continue
             # Read the CSV file into a DataFrame
             # Use the first row as the header (header=0)
             # Use the first column as the index (index_col=0)
