@@ -1,29 +1,315 @@
-from typing import cast
+from typing import Callable
 
 import numpy as np
 import porepy as pp
+from scipy.optimize import minimize_scalar
+
+
+def fit_thermal_expansion(
+    depth_max: float,
+    temperature_at_depth: Callable[[np.ndarray], np.ndarray],
+    density: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    rho_ref: float,
+    T_ref: float,
+    p_ref: float = 0.0,
+    n_points: int = 2000,
+    c_T_bounds: tuple[float, float] = (1e-5, 5e-3),
+) -> float:
+    r"""Fit an effective thermal-expansion coefficient :math:`c_T` for an exponential
+    fluid-density law over a given depth range.
+
+    The exponential law used by
+    :class:`~porepy.models.fluid_property_library.FluidDensityFromPressureAndTemperature`
+    is
+
+    .. math::
+
+        \rho(T, p) = \rho_{\rm ref}
+                     \exp\!\bigl[c_p(p - p_{\rm ref}) - c_T(T - T_{\rm ref})\bigr]
+
+    A constant :math:`c_T` cannot reproduce the strongly nonlinear variation of water
+    density with temperature.  This function finds the single value of :math:`c_T` that
+    minimises the depth-weighted mean-squared error between the exponential law and a
+    reference density function ``density(T, p)`` sampled uniformly along the depth
+    column.
+
+    Depth-weighting (uniform sampling in depth rather than temperature) is important
+    here because the steep shallow geotherm (e.g. 150 mK/m) concentrates many
+    temperature values near the surface, which would otherwise bias the fit toward the
+    low-temperature end of the range.
+
+    Only the thermal part of the exponential is fitted.  The pressure part
+    :math:`c_p(p - p_{\rm ref})` is removed from the reference density before fitting
+    by evaluating ``density`` at the fixed reference pressure ``p_ref``, so the result
+    is independent of the compressibility.
+
+    All arguments must use **consistent units** (SI or model units, but not mixed).
+
+    Parameters:
+        depth_max: Maximum depth [m] over which to sample the geotherm.
+        temperature_at_depth: Callable ``T = f(depths)`` returning a 1-D array of
+            temperatures at the supplied depth array (shape ``(n,)``).  Must accept
+            and return values in the same unit system as ``rho_ref`` and ``T_ref``.
+        density: Callable ``rho = f(T, p)`` returning fluid density from 1-D arrays
+            of temperature and pressure.  Should correspond to the reference density
+            model (e.g. IAPWS-IF97 lookup table or the Kroll polynomial).
+        rho_ref: Reference density :math:`\rho_0` at ``(T_ref, p_ref)`` [kg/m³], i.e.
+            the prefactor in the exponential law.
+        T_ref: Reference temperature :math:`T_{\rm ref}` [K].
+        p_ref: Reference pressure at which ``density`` is evaluated for fitting.
+            Defaults to 0 (gauge pressure), which removes the compressibility
+            contribution and isolates the thermal part of the fit.
+        n_points: Number of evenly-spaced depth samples used for fitting.  Higher
+            values improve accuracy at the cost of more ``density`` evaluations.
+            Defaults to 2000.
+        c_T_bounds: Search interval ``(c_T_min, c_T_max)`` [K⁻¹] passed to the
+            bounded scalar minimiser.  Defaults to ``(1e-5, 5e-3)``, which covers
+            the range from near-incompressible (cold) to strongly expansive (hot)
+            water.
+
+    Returns:
+        Depth-weighted optimal :math:`c_T` [K⁻¹].
+
+    Raises:
+        ValueError: If ``c_T_bounds[0] >= c_T_bounds[1]`` or ``n_points < 2``.
+
+    Notes:
+        - The fit minimises :math:`\sum_i [\rho_{\rm ref} \exp(-c_T (T_i - T_{\rm ref}))
+          - \rho_{\rm ref}(T_i, p_{\rm ref})]^2` using
+          :func:`scipy.optimize.minimize_scalar` with Brent's method.
+        - For highly nonlinear temperature profiles the optimal :math:`c_T` may
+          overestimate density near the surface and underestimate it at depth (or
+          vice versa); inspect the residuals if accuracy across the full range is
+          critical.
+
+    Example:
+        Fit :math:`c_T` for a bilinear Coso geotherm and an IAPWS-derived lookup
+        table::
+
+            import numpy as np
+
+            T_tab = np.array([20, 60, 100, 140, 180, 220, 240]) + 273.15
+            rho_tab = np.array([998.2, 983.2, 958.4, 926.1, 886.9, 840.3, 815.0])
+
+            def T_profile(depths):
+                return np.where(depths < 1100,
+                                293.15 + 0.150 * depths,
+                                293.15 + 0.150 * 1100 + 0.020 * (depths - 1100))
+
+            def rho_lookup(T, p):
+                return np.interp(T, T_tab, rho_tab)
+
+            rho_ref = float(np.interp(323.15, T_tab, rho_tab))  # at 50 °C
+            c_T = fit_thermal_expansion(
+                depth_max=4000.0,
+                temperature_at_depth=T_profile,
+                density=rho_lookup,
+                rho_ref=rho_ref,
+                T_ref=323.15,
+            )
+    """
+    if c_T_bounds[0] >= c_T_bounds[1]:
+        raise ValueError(f"c_T_bounds must satisfy lower < upper, got {c_T_bounds}.")
+    if n_points < 2:
+        raise ValueError(f"n_points must be at least 2, got {n_points}.")
+
+    depths = np.linspace(0.0, depth_max, n_points)
+    T_profile = temperature_at_depth(depths)
+    # Reference density at each depth, evaluated at p_ref to isolate the thermal
+    # contribution (pressure part cancels because p == p_ref everywhere).
+    p_profile = np.full_like(T_profile, p_ref)
+    rho_reference = density(T_profile, p_profile)
+
+    def _mse(c_T: float) -> float:
+        rho_exp = rho_ref * np.exp(-c_T * (T_profile - T_ref))
+        return float(np.mean((rho_exp - rho_reference) ** 2))
+
+    result = minimize_scalar(_mse, bounds=c_T_bounds, method="bounded")
+    return float(result.x)  # type: ignore[union-attr]
+
+
+class PolynomialFluidDensityNp:
+    """Mixin providing a polynomial numpy density for use in hydrostatic integration.
+
+    Implements the Kroll et al. polynomial:
+
+    .. math::
+
+        \\rho_0(T) = 1000 - 0.07\\,\\Delta T - 0.0002\\,\\Delta T^2 \\;\\text{[kg/m³]}
+
+    corrected for pressure compressibility as
+    :math:`\\rho = \\rho_0(T)\\,[1 + c_p(p - p_{\\rm atm})]`.
+
+    This is the form used in the (currently disabled) ``___density_of_phase``
+    implementation.  Mix in instead of :class:`CosoBackgroundValues` to switch
+    the hydrostatic integration to the polynomial law.
+    """
+
+    def _fluid_density_np(self, T: np.ndarray, p: np.ndarray) -> np.ndarray:
+        """Polynomial fluid density as a function of temperature and pressure.
+
+        Parameters:
+            T: Temperature array in model units [K].
+            p: Pressure array in model units [Pa].
+
+        Returns:
+            Fluid density array in model units [kg/m³].
+        """
+        dT = T - pp.Celsius_to_Kelvin(20)
+        rho_0 = (
+            self.units.convert_units(1000.0, "kg*m^-3")
+            - self.units.convert_units(0.07, "kg*m^-3*K^-1") * dT
+            - self.units.convert_units(0.0002, "kg*m^-3*K^-2") * dT**2
+        )
+        p_ref = self.units.convert_units(pp.ATMOSPHERIC_PRESSURE, "Pa")
+        c = self.fluid.reference_component.compressibility
+        return rho_0 * (1.0 + c * (p - p_ref))
 
 
 class CosoBackgroundValues:
-    def hydrostatic_pressure(self, depth: np.ndarray) -> np.ndarray:
-        r"""Compute hydrostatic pressure at given depths.
+    def _fluid_density_np(self, T: np.ndarray, p: np.ndarray) -> np.ndarray:
+        """Fluid density as a function of temperature and pressure (numpy version).
 
-        According to Exploring Whether Subsurface Fluid Production Can Minimize
-        Triggered Seismicity in Geothermal Fields K. A. Kroll, H. Wu, P. Fu, the
-        pressure gradient is 7.19 MPa/km
+        Matches ``pp.constitutive_laws.FluidDensityFromPressureAndTemperature``, the
+        law used by ``pp.Thermoporomechanics``:
+
+        .. math::
+
+            \\rho(T, p) = \\rho_0 \\exp\\!\\left[c_p(p - p_{\\rm ref})
+                          - c_T(T - T_{\\rm ref})\\right]
+
+        The material constants are taken from ``self.fluid.reference_component``; the
+        reference state is read from ``self.reference_variable_values`` (already in
+        model units).
 
         Parameters:
-            depth: Array of depths at which to compute hydrostatic pressure.
+            T: Temperature array in model units [K].
+            p: Pressure array in model units [Pa].
+
+        Returns:
+            Fluid density array in model units [kg/m³].
+        """
+        rho_0 = self.fluid.reference_component.density
+        c_p = self.fluid.reference_component.compressibility
+        c_T = self.fluid.reference_component.thermal_expansion
+        p_ref = self.reference_variable_values.pressure
+        T_ref = self.reference_variable_values.temperature
+        return rho_0 * np.exp(c_p * (p - p_ref) - c_T * (T - T_ref))
+
+    def hydrostatic_pressure(self, depth: np.ndarray) -> np.ndarray:
+        r"""Compute hydrostatic pressure by integrating :math:`dp/dz = \rho(T,p)\,g`.
+
+        Temperature at depth is obtained from :meth:`temperature_at_depth` and fluid
+        density is evaluated as a function of both *T* and *p* via
+        :meth:`_fluid_density_np`, making the integration self-consistent.
+
+        Parameters:
+            depth: Array of depths [m] at which to compute hydrostatic pressure.
 
         Returns:
             Array of hydrostatic pressure values at the given depths.
-
         """
-        gradient = self.units.convert_units(7.19e3, "Pa/m")
-        pressure = gradient * depth + self.units.convert_units(
-            pp.ATMOSPHERIC_PRESSURE, units="Pa"
+        # Delegate to parent (constant-density formula) for empty depth arrays; avoids
+        # corner cases in max() and solve_ivp below.
+        super_val = super().hydrostatic_pressure(depth)
+        if depth.size == 0:
+            return super_val
+
+        from scipy.integrate import solve_ivp
+
+        # Gravity magnitude in model units [model-m * s^-2].
+        g = self.units.convert_units(pp.GRAVITY_ACCELERATION, "m*s^-2")
+        # Atmospheric pressure in model units: initial condition p(z=0) = p_atm.
+        p_surface = self.units.convert_units(pp.ATMOSPHERIC_PRESSURE, "Pa")
+
+        # Integrate from the surface (z=0) down to the deepest requested point.
+        z_max = float(np.max(depth))
+        # All points are at the surface; return p_atm everywhere.
+        if z_max == 0.0:
+            return np.full_like(depth, p_surface, dtype=float)
+
+        def rhs(z: float, p_vec: list) -> list:
+            # Temperature at the current depth, from the piecewise-linear geotherm.
+            T = self.temperature_at_depth(np.array([z]))[0]
+            # Density at (T, p): matches FluidDensityFromPressureAndTemperature used by
+            # the AD model, so the hydrostatic state is self-consistent with the solver.
+            rho = self._fluid_density_np(np.array([T]), np.array([p_vec[0]]))[0]
+            # dp/dz = rho * g  (z positive downward, p increases with depth).
+            return [rho * g]
+
+        sol = solve_ivp(
+            rhs,
+            t_span=(0.0, z_max),  # integrate from surface to maximum depth
+            y0=[p_surface],  # initial condition: atmospheric pressure at z=0
+            method="RK45",  # explicit Runge-Kutta of order 4(5)
+            dense_output=True,  # build a continuous solution for arbitrary depths
+            rtol=1e-6,  # relative tolerance
+            atol=self.units.convert_units(1e0, "Pa"),  # absolute tolerance: 1 Pa
         )
-        return pressure
+        # for z1 in [1600, 1800, 2000]:
+
+        #     def rhs_in(z: float, p_vec: list) -> list:
+        #         # Temperature at the current depth, from the piecewise-linear geotherm.
+        #         T = pp.Celsius_to_Kelvin(
+        #             40
+        #         )  #  self.params[f"{self.injection_well_names[0]}_temperature"][0]
+        #         # Density at (T, p): matches FluidDensityFromPressureAndTemperature used by
+        #         # the AD model, so the hydrostatic state is self-consistent with the solver.
+        #         rho = self._fluid_density_np(np.array([T]), np.array([p_vec[0]]))[0]
+        #         # dp/dz = rho * g  (z positive downward, p increases with depth).
+        #         return [rho * g]
+
+        #     sol_in = solve_ivp(
+        #         rhs_in,
+        #         t_span=(0.0, z1),  # integrate from surface to maximum depth
+        #         y0=[p_surface],  # initial condition: atmospheric pressure at z=0
+        #         method="RK45",  # explicit Runge-Kutta of order 4(5)
+        #         dense_output=True,  # build a continuous solution for arbitrary depths
+        #         rtol=1e-6,  # relative tolerance
+        #         atol=self.units.convert_units(1e0, "Pa"),  # absolute tolerance: 1 Pa
+        #     )
+        #     p_est = self.units.convert_units(sol.sol(z1)[0], "Pa", to_si=True)
+        #     p_in_est = self.units.convert_units(sol_in.sol(z1)[0], "Pa", to_si=True)
+        #     print(
+        #         f"Comparing hydrostatic pressure at depth {z1:.0f} m for polynomial and constant-density laws:"
+        #     )
+        #     print(f"Depth {z1:.0f} m: p(polynomial) = {p_est:.2e} Pa")
+        #     print(
+        #         f"Depth {z1:.0f} m: p(constant rho injection) = "
+        #         f"{p_in_est:.2e} Pa. Difference = "
+        #         f"{p_est - p_in_est:.2e} Pa"
+        #     )
+        #     for z0 in np.arange(1600, 2200, 200):
+        #         # Do some comparisons.
+        #         def rhs0(z: float, p_vec: list) -> list:
+        #             # Temperature at the current depth, from the piecewise-linear geotherm.
+        #             T = self.temperature_at_depth(np.array([z0]))[0]
+        #             # Density at (T, p): matches FluidDensityFromPressureAndTemperature used by
+        #             # the AD model, so the hydrostatic state is self-consistent with the solver.
+        #             rho = self._fluid_density_np(np.array([T]), np.array([p_vec[0]]))[0]
+        #             # dp/dz = rho * g  (z positive downward, p increases with depth).
+        #             return [rho * g]
+
+        #         sol0 = solve_ivp(
+        #             rhs0,
+        #             t_span=(0.0, z0),  # integrate from surface to maximum depth
+        #             y0=[p_surface],  # initial condition: atmospheric pressure at z=0
+        #             method="RK45",  # explicit Runge-Kutta of order 4(5)
+        #             dense_output=True,  # build a continuous solution for arbitrary depths
+        #             rtol=1e-6,  # relative tolerance
+        #             atol=self.units.convert_units(
+        #                 1e0, "Pa"
+        #             ),  # absolute tolerance: 1 Pa
+        #         )
+        #         p_0 = self.units.convert_units(sol0.sol(z1)[0], "Pa", to_si=True)
+
+        #         print(
+        #             f"p(const rho z={z0:.0f} m) = {p_0:.2e} Pa, difference = {p_est - p_0:.2e} Pa"
+        #         )
+
+        # Evaluate the continuous solution at every requested depth in one vectorised
+        # call; sol.sol(depth) has shape (1, n), so take row 0.
+        return sol.sol(depth)[0]
 
     def temperature_at_depth(self, depth: np.ndarray) -> np.ndarray:
         """Compute temperature at given depths.
@@ -36,15 +322,18 @@ class CosoBackgroundValues:
         """
         # Steep gradient of 245 K/km first 1.1 km, then 5.6 K/km below that, according
         # to Kroll et al.
-        surface_temperature = self.params.get(
-            "surface_temperature", self.units.convert_units(20, "Celsius")
-        )
-        gradient1 = self.units.convert_units(245, "K/km")
-        gradient2 = self.units.convert_units(5.6, "K/km")
+        gradient1 = self.units.convert_units(245e-3, "K*m^-1")
+        gradient2 = self.units.convert_units(5.6e-3, "K*m^-1")
+        #         The Feedback Between Stress, Faulting, and Fluid Flow:
+        #  Lessons from the Coso Geothermal Field, CA, USA
+        # Nicholas C. Davatzes1
+        #  and Stephen H. Hickman2
+        gradient1 = self.units.convert_units(150e-3, "K*m^-1")
+        gradient2 = self.units.convert_units(20e-3, "K*m^-1")
         temperature = np.where(
             depth < 1100,
-            surface_temperature + gradient1 * depth,
-            surface_temperature + gradient1 * 1100 + gradient2 * (depth - 1100),
+            self.surface_temperature + gradient1 * depth,
+            self.surface_temperature + gradient1 * 1100 + gradient2 * (depth - 1100),
         )
         return temperature
 
@@ -325,7 +614,6 @@ class HagenPoiseuilleWellPermeability:
 
 
 class PhysicalModel(
-    # CosoBackgroundValues,
     pp.constitutive_laws.GravityForce,
     # pp.SinglePhaseFlow,
     pp.Thermoporomechanics,
