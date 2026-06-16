@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,36 @@ from save_fracture_coords import easting_northing_offset_to_strike_angle_dip_ang
 from wells import WellDataConceptual, WellDataCoso
 
 
-class CosoGeometry:
+class Layers:
+    def caprock_depth(self) -> float:
+        """Depth of the caprock.
+
+        Returns:
+            Depth of the caprock in meters.
+        """
+        return self.params.get("caprock_depth", 1.1e3)
+
+    def reservoir_depth(self) -> float:
+        """Depth of the reservoir.
+
+        Returns:
+            Depth of the reservoir in meters.
+        """
+        return self.params.get("reservoir_depth", 3e3)
+
+
+class CosoGeometry(Layers):
+    def domain_sizes(self) -> np.ndarray:
+        """Return domain extents [Lx, Ly, Lz] from the current bounding box."""
+        box = self._domain.bounding_box
+        return np.array(
+            [
+                box["xmax"] - box["xmin"],
+                box["ymax"] - box["ymin"],
+                box["zmax"] - box["zmin"],
+            ]
+        )
+
     def set_domain(self):
         pth = sys.path[0]
         self._fn_temp = pp.fracture_importer.network_3d_from_csv(
@@ -38,11 +68,22 @@ class CosoGeometry:
         pth = sys.path[0]
         # The file is in the same directory as this script.
         fn = f"{pth}/data/wellbores.xlsx"
-        for name in self.well_names:
-            # Read columns 4-6 (counting from 1), which are the x, y, z coordinates,
-            # from the "name" sheet, skipping the header.
-            with pd.ExcelFile(fn) as xls:
-                df = pd.read_excel(xls, sheet_name=name, usecols=[3, 4, 5], skiprows=1)
+        sheet_map: dict[str, str] = self.params.get("well_sheet_names", {})
+        with pd.ExcelFile(fn) as xls:
+            for name in self.well_names:
+                sheet_name = sheet_map.get(name, name)
+                # Read columns 4-6 (counting from 1), which are the x, y, z coordinates,
+                # from the selected sheet, skipping the header.
+                try:
+                    df = pd.read_excel(
+                        xls, sheet_name=sheet_name, usecols=[3, 4, 5], skiprows=1
+                    )
+                except ValueError as e:
+                    raise ValueError(
+                        f"Worksheet named '{sheet_name}' not found for well '{name}'. "
+                        f"Set params['well_sheet_names'][{name!r}] to a valid sheet."
+                    ) from e
+
                 # For whatever reason, the ordering is y, x, z in the file.
                 df = df.iloc[:, [1, 0, 2]]
                 pts = df.values.T
@@ -245,7 +286,7 @@ class FractureGeometry2(EllipticFractureGeometry):
         )
 
 
-class ConceptualGeometry(TwoEllipticFractures3d):
+class ConceptualGeometry(TwoEllipticFractures3d, Layers):
     def set_well_network(self) -> None:
         """Assign well network class."""
         if not self.params.get("use_wells", True):
@@ -342,39 +383,57 @@ class ConceptualGeometry(TwoEllipticFractures3d):
 
 
 class ConceptualGeometryTwoFractures(ConceptualGeometry):
-    def caprock_depth(self) -> float:
-        """Depth of the caprock.
+    def set_domain(self):
 
-        Returns:
-            Depth of the caprock in meters.
-        """
-        return self.params.get("caprock_depth", 1.1e3)
-
-    def reservoir_depth(self) -> float:
-        """Depth of the reservoir.
-
-        Returns:
-            Depth of the reservoir in meters.
-        """
-        return self.params.get("reservoir_depth", 3e3)
+        box = {
+            "xmin": 0,
+            "xmax": self.domain_sizes()[0],
+            "ymin": 0,
+            "ymax": self.domain_sizes()[1],
+            "zmin": -self.domain_sizes()[2],
+            "zmax": 0.0,
+        }
+        self._domain = pp.Domain(bounding_box=box)
 
     def fracture_names(self) -> list[str]:
         return ["Fracture 1", "Fracture 2"]
 
+    @property
+    def z_fractures(self) -> float:
+        """Depth of the fractures.
+
+        Returns:
+            Depth of the fractures in meters.
+        """
+        return -1600
+
     def set_fractures(self):
         """Keep first fracture and create second fracture at same y location but different x location."""
         # Call the parent class's set_fractures method
-        super().set_fractures()
-        # Remove the second and third fracture
-        self._fractures = self._fractures[:1]
+        #  0 injection,
+        #  1 production,
         y_mid = self.domain_sizes()[1] / 2
-        z = -self.domain_sizes()[2] / 2
-        x = self.domain_sizes()[0] / 8 * 3
-        center = np.array([x, y_mid, z])
-        # Production fracture, always connected.
+        z = self.z_fractures
+        x_prod, x_inj = self.well_x_coords
+
+        center_injection = np.array([x_inj, y_mid, z])
+        # First the injection fracture.
+        self._fractures = [
+            pp.EllipticFracture(
+                center=center_injection,
+                strike_angle=np.pi / 2,
+                dip_angle=np.pi / 2,
+                major_axis=self.fracture_major_axes[2],
+                minor_axis=self.fracture_minor_axes[2],
+                major_axis_angle=0,
+            )
+        ]
+
+        center_production = np.array([x_prod, y_mid, z])
+        # Production fracture.
         self._fractures.append(
             pp.EllipticFracture(
-                center=center,
+                center=center_production,
                 strike_angle=np.pi / 4,
                 dip_angle=np.pi / 2,
                 major_axis=self.fracture_major_axes[0],
@@ -383,17 +442,56 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
             )
         )
 
+    def well_radius(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Compute well radius for Peaceman well model.
+
+        Parameters:
+            subdomains: List of subdomains.
+
+        Returns:
+            Cell-wise well radius operator [m].
+
+        """
+        if len(subdomains) == 0:
+            return super().well_radius(subdomains)
+        r_w = []
+        for sd in subdomains:
+            parent_well = self.parent_well(sd)
+            if parent_well is None:
+                r_w.append(np.full(sd.num_cells, 1.0))
+            elif self.is_production_well(parent_well):
+                r_w.append(np.full(sd.num_cells, self.solid.well_radius))
+            elif self.is_injection_well(parent_well):
+                r_w.append(np.full(sd.num_cells, self.solid.well_radius / 2))
+            else:
+                raise ValueError(
+                    "Grid is marked as well grid but is neither production nor injection."
+                )
+        r_w = np.concatenate(r_w)
+        radius = pp.ad.DenseArray(r_w, name="well_radius")
+        return radius
+
+    @property
+    def well_x_coords(self) -> tuple[float, float]:
+        """X coordinates of the well.
+
+        Returns:
+            Tuple with x  coordinates of the wells in meters.
+        """
+        x = self.domain_sizes()[0] * 0.45
+        dx = self.domain_sizes()[0] * 0.1
+        return x, x + dx
+
     def set_well_network(self) -> None:
         """Assign well network class."""
         if not self.params.get("use_wells", True):
             return super().set_well_network()
 
-        dx = self.domain_sizes()[0] / 4
         y_mid = self.domain_sizes()[1] / 2
-        z = -self.domain_sizes()[2]
-        x = self.domain_sizes()[0] / 8 * 3
+        z = self.z_fractures * 1.5  # 3 / 2
+        x_prod, x_inj = self.well_x_coords
 
-        x_prod = np.full((1, 2), x)
+        x_prod = np.full((1, 2), x_prod)
         y_prod = np.array(
             [
                 [
@@ -403,14 +501,14 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
             ]
         )
         z_top = 0
-        z_prod = np.array([[z_top, 3 / 4 * z]])
+        z_prod = np.array([[z_top, z]])
         pts_prod = np.vstack([x_prod, y_prod, z_prod])
         # Create a well object.
         well_prod = pp.Well(pts_prod, tags={"well_name": self.production_well_names[0]})
-        x_inj = np.full((1, 2), x + dx)
-        y_inj = np.array([[y_mid + 2, y_mid - 1]])
-        z_inj = np.array([[z_top, 3 / 4 * z]])
-        pts_inj = np.vstack([x_inj, y_inj, z_inj])
+        x_injection = np.full((1, 2), x_inj)
+        y_injection = np.array([[y_mid + 2, y_mid - 1]])
+        z_injection = np.array([[z_top, z]])
+        pts_inj = np.vstack([x_injection, y_injection, z_injection])
         # Create a well object.
         well_inj = pp.Well(
             pts_inj, tags={"well_name": self.injection_well_names[0]}
@@ -419,7 +517,9 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
         self.well_network = pp.WellNetwork3d(
             domain=self._domain,
             wells=wells,
-            parameters={"mesh_size": self.params["meshing_arguments"]["cell_size"] / 2},
+            parameters={
+                "mesh_size": self.params["meshing_arguments"]["cell_size"] / 10
+            },
         )
 
 
@@ -683,6 +783,97 @@ class CoolingGeometry(TwoEllipticFractures3d):
         self.well_network = pp.WellNetwork3d(
             domain=self._domain, wells=wells, parameters={"mesh_size": 150.0}
         )
+
+
+class FaultPlaneGeometry(CosoGeometry):
+    """Geometry mixin that loads fault planes from UTM point-cloud CSV files.
+
+    By default all CSV files in ``point_cloud_clusters/`` (relative to the script
+    directory) are loaded.  Additional directories can be added via
+    ``params["fault_plane_dirs"]``.  Individual files can be suppressed with
+    ``params["exclude_faults"]``.
+
+    Optionally, fractures can be geometrically extended to improve network
+    connectivity by supplying a JSON config file via
+    ``params["fault_extension_config"]``.  See :mod:`fault_planes` for the
+    config format.
+
+    Example params::
+
+        params = {
+            "fault_plane_dirs": ["UiB_SURF_faults", "point_cloud_clusters"],
+            "exclude_faults": ["0003"],
+            "fault_extension_config": "fault_extensions.json",
+        }
+    """
+
+    def set_domain(self) -> None:
+        """Set domain as padded bounding box of all loaded fault planes."""
+        pth = Path(sys.path[0])
+        dirs = self.params.get("fault_plane_dirs", ["point_cloud_clusters"])
+        exclude = self.params.get("exclude_faults", [])
+
+        all_pts: list[np.ndarray] = []
+        for d in dirs:
+            directory = pth / d
+            fracs = load_fault_planes(directory, exclude=exclude)
+            for frac in fracs:
+                all_pts.append(frac.pts)
+
+        if not all_pts:
+            raise ValueError(
+                "No fault planes loaded. Check 'fault_plane_dirs' and 'exclude_faults'."
+            )
+
+        pts_all = np.hstack(all_pts)  # (3, total_corners)
+        pad_xy, pad_z = 1.0e3, 1.0e2
+        top_boundary_z = self.params.get("top_boundary_z", 0.0)
+        box = {
+            "xmin": pts_all[0].min() - pad_xy,
+            "xmax": pts_all[0].max() + pad_xy,
+            "ymin": pts_all[1].min() - pad_xy,
+            "ymax": pts_all[1].max() + pad_xy,
+            "zmin": pts_all[2].min() - pad_z,
+            "zmax": top_boundary_z,
+        }
+        self._domain = pp.Domain(bounding_box=box)
+
+    def set_fractures(self) -> None:
+        """Load fault planes, optionally apply extensions, store in _fractures."""
+        pth = Path(sys.path[0])
+        dirs = self.params.get("fault_plane_dirs", ["point_cloud_clusters"])
+        exclude = self.params.get("exclude_faults", [])
+
+        fractures: list[pp.PlaneFracture] = []
+        names: list[str] = []
+        for d in dirs:
+            directory = pth / d
+            batch = load_fault_planes(directory, exclude=exclude)
+            fractures.extend(batch)
+            names.extend(frac.fault_name for frac in batch)
+
+        config_path = self.params.get("fault_extension_config")
+        if config_path is not None:
+            config_path = pth / config_path
+            fractures = apply_extensions(fractures, names, config_path)
+
+        self._fractures = fractures
+        self._fault_names = names
+
+    def fracture_names(self) -> list[str]:
+        """Return stable names for loaded fault planes.
+
+        Exporters index fracture data by ``sd.frac_num`` and require this method.
+        """
+        names = getattr(self, "_fault_names", None)
+        if names is not None and len(names) == len(self._fractures):
+            return names
+
+        recovered = [
+            getattr(frac, "fault_name", f"fault_{i:04d}")
+            for i, frac in enumerate(self._fractures)
+        ]
+        return recovered
 
 
 if __name__ == "__main__":
