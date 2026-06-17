@@ -68,19 +68,17 @@ class CosoGeometry(Layers):
         pth = sys.path[0]
         # The file is in the same directory as this script.
         fn = f"{pth}/data/wellbores.xlsx"
-        sheet_map: dict[str, str] = self.params.get("well_sheet_names", {})
         with pd.ExcelFile(fn) as xls:
             for name in self.well_names:
-                sheet_name = sheet_map.get(name, name)
                 # Read columns 4-6 (counting from 1), which are the x, y, z coordinates,
                 # from the selected sheet, skipping the header.
                 try:
                     df = pd.read_excel(
-                        xls, sheet_name=sheet_name, usecols=[3, 4, 5], skiprows=1
+                        xls, sheet_name=name, usecols=[3, 4, 5], skiprows=1
                     )
                 except ValueError as e:
                     raise ValueError(
-                        f"Worksheet named '{sheet_name}' not found for well '{name}'. "
+                        f"Worksheet named '{name}' not found for well '{name}'. "
                         f"Set params['well_sheet_names'][{name!r}] to a valid sheet."
                     ) from e
 
@@ -93,7 +91,12 @@ class CosoGeometry(Layers):
                 # first point in the wellbore.
                 pt0 = pts[:, 0].copy().reshape((3, 1))
                 pt0[2] = self._domain.bounding_box["zmax"]
-                pts = np.hstack([pt0, pts])
+                if self.params.get("straight_wells", True):
+                    z_min_ind = np.argmin(pts[2])
+                    pt1 = pts[:, z_min_ind].copy().reshape((3, 1))
+                    pts = np.hstack([pt0, pt1])
+                else:
+                    pts = np.hstack([pt0, pts])
                 # Create a well object.
                 well = pp.Well(pts, tags={"well_name": name})
                 wells.append(well)
