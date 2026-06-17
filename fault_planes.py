@@ -311,7 +311,10 @@ def _directional_extension(
 
     Parameters:
         frac:   The fracture to extend.
-        axis:   Direction vector (need not be unit length).
+        axis:   Direction vector (need not be unit length). The two corners with the
+            largest positive projection onto this axis will be shifted in the plane.
+            The remaining
+            two corners will be left unchanged.
         amount: Distance in metres to shift the two leading corners.
 
     Returns:
@@ -329,7 +332,15 @@ def _directional_extension(
 
     # Shift the two corners with the largest dot product.
     top2 = np.argsort(dots)[-2:]
-    corners[:, top2] += amount * ax[:, np.newaxis]
+    # The shift prolongs the fracture in-plane by adding a patch of width ~amount at the
+    # leading edge.  The shift direction is parallel to the axis but perpendicular to
+    # the normal, i.e., in the plane of the fracture.
+    along_edge = np.cross(frac.normal.ravel(), ax)  # in-plane direction along the edge
+    # in-plane direction perpendicular to edge (i.e., outward normal to leading edge),
+    # sign ensures outward.
+    shift_direction = -np.cross(frac.normal.ravel(), along_edge)
+    shift_direction = shift_direction / np.linalg.norm(shift_direction)  # unit vector
+    corners[:, top2] += amount * shift_direction[:, np.newaxis]
 
     new_frac = pp.PlaneFracture(corners, check_convexity=False)
     new_frac.fault_name = frac.fault_name
