@@ -43,7 +43,8 @@ class SolutionStrategy(FluxDiscretization):
         """
         # First read input from the well data files. This is used when setting initial
         # BCs.
-        self.read_well_data()
+        if hasattr(self, "read_well_data"):
+            self.read_well_data()
         # self.fracture_locking_variable = pp.ad.Scalar(0)
         super().initial_condition()
 
