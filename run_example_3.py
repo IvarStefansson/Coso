@@ -55,7 +55,7 @@ from exporting import CosoExporter, GeometryExporting
 from initial_conditions import CopyInitialCondition
 from solution_strategy import SolutionStrategy
 from solver_configurations import linear_solver_params, solver_params
-from wells import WellDataConceptual
+from wells import _WellDataBase
 
 LOG_TO_FILE = False
 log_dir = "example_3_logs"
@@ -103,7 +103,7 @@ class BaseModel(
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
     pp.models.solution_strategy.ContactIndicators,
-    WellDataConceptual,
+    _WellDataBase,
     HydrostaticBoundaryPressureValues,
     ThermalGradientBoundaryTemperatureValues,
     LithostaticBoundaryStressValues,
@@ -452,9 +452,10 @@ if __name__ == "__main__":
                 }
                 model_params_init = {
                     "fault_plane_dirs": ["point_cloud_clusters"],
+                    "fault_extension_config": "fault_extensions.json",
                     "exclude_faults": [
                         "0002",
-                        "0003",  #
+                        # "0003", Intersects injection, extended in config
                         "0004",
                         "0006",  #
                         "0007",
@@ -467,6 +468,7 @@ if __name__ == "__main__":
                     "well_sheet_names": {
                         "1 Injection well": "68-20RD",
                         "2 Production well": "16A-20",
+                        "3 Production well": "16B-20",
                     },
                     "top_boundary_z": 0.0,
                     "read_well_operation_data": False,
