@@ -128,6 +128,31 @@ def fit_thermal_expansion(
     return float(result.x)  # type: ignore[union-attr]
 
 
+class HeterogeneousWellRadius:
+    def grid_aperture(self, grid: pp.Grid) -> np.ndarray:
+        """Get the aperture of a single grid.
+
+        Parameters:
+            grid: Grid for which to compute the aperture.
+
+        Returns:
+            Aperture for each cell in the grid.
+
+        """
+        aperture = np.ones(grid.num_cells)
+        if grid.dim < self.nd:
+            if self.is_well_grid(grid):
+                # This is a well. The aperture is the well radius.
+                aperture *= self.well_radius([grid]).value(self.equation_system)
+            else:
+                aperture = self.solid.residual_aperture * aperture
+        else:
+            # For the matrix, the aperture is one, but needs to be scaled by the
+            # length units.
+            aperture = self.units.convert_units(aperture, "m")
+        return aperture
+
+
 class PolynomialFluidDensityNp:
     """Mixin providing a polynomial numpy density for use in hydrostatic integration.
 
