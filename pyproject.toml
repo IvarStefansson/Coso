@@ -1,0 +1,5 @@
+[project]
+name = "Run scripts: Drivers and triggers of shut-in seismicity at the Coso geothermal field"
+dependencies = [
+    "openpyxl",
+]
