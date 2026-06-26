@@ -14,7 +14,9 @@ from geometry import (
     ConstraintsCapcrockAndReservoirDepth,
     FaultPlaneGeometry,
 )
-
+from porepy.models.contact_mechanics import (
+    RadialReturnTangentialContactMechanicsEquation,
+)
 from material_parameters import granodiorite_values
 from physical_model import (
     HeterogeneousPermeabilitySpecification,
@@ -53,7 +55,11 @@ from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 from exporting import CosoExporter, GeometryExporting
 from initial_conditions import CopyInitialCondition
 from solution_strategy import SolutionStrategy
-from solver_configurations import linear_solver_params, solver_params
+from solver_configurations import (
+    linear_solver_params,
+    solver_params,
+    linear_solver_selector_params,
+)
 from wells import _WellDataBase
 
 LOG_TO_FILE = False
@@ -106,6 +112,7 @@ class BaseModel(
     HydrostaticBoundaryPressureValues,
     ThermalGradientBoundaryTemperatureValues,
     LithostaticBoundaryStressValues,
+    # RadialReturnTangentialContactMechanicsEquation,
     PhysicalModel,
 ):
     """Model for the Coso geothermal reservoir."""
@@ -359,7 +366,7 @@ def log_summary(velocity: float, period: float, with_production: bool):
 
 
 NUM_BINS_PER_INTERVAL = 3
-USE_ITERATIVE_SOLVER = True
+USE_ITERATIVE_SOLVER = False
 if USE_ITERATIVE_SOLVER and "pp_solvers" not in sys.modules:
     raise ImportError(
         "pp_solvers module is required for iterative solvers. Please install pp_solvers"
@@ -400,7 +407,7 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 8.0e3
                 fracture_size = 6e2
-                refinement = 2.9 if USE_ITERATIVE_SOLVER else 2.9
+                refinement = 2.9 if USE_ITERATIVE_SOLVER else 1.5
                 cell_size = 10e2 * refinement
                 cell_size_fracture = 0.4 * fracture_size * refinement
 
@@ -453,7 +460,7 @@ if __name__ == "__main__":
                     "fault_extension_config": "fault_extensions.json",
                     "exclude_faults": [
                         "0002",
-                        # "0003", Intersects injection, extended in config
+                        # "0003",  #  Intersects injection, extended in config
                         "0004",
                         "0006",  #
                         "0007",
@@ -511,6 +518,25 @@ if __name__ == "__main__":
                     "boundary_displacement_velocity": velocity / pp.YEAR,
                     "surface_temperature": pp.Celsius_to_Kelvin(20.0),
                 }
+                if USE_ITERATIVE_SOLVER:
+                    initialization_class = add_mixin(
+                        pp_solvers.IterativeSolverMixin, InitializationModel
+                    )
+                    model_class = add_mixin(pp_solvers.IterativeSolverMixin, MainModel)
+                    if (
+                        solver_selector := False
+                    ):  # Use the solver selector if available.
+                        model_params_init["linear_solver"] = (
+                            linear_solver_selector_params
+                        )
+                    else:
+                        model_params_init["linear_solver"] = {
+                            "preconditioner_factory": pp_solvers.thm_factory
+                        }
+
+                        model_params_init["linear_solver"]["options"] = (
+                            linear_solver_params
+                        )
                 model_params = copy.deepcopy(model_params_init)
                 if with_prod:
                     injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
@@ -527,15 +553,6 @@ if __name__ == "__main__":
                         model_params[f"{name}_temperatures"] = production_t
 
                 initialization_class = InitializationModel
-                if USE_ITERATIVE_SOLVER:
-                    initialization_class = add_mixin(
-                        pp_solvers.IterativeSolverMixin, InitializationModel
-                    )
-                    model_params_init["linear_solver"] = {
-                        "preconditioner_factory": pp_solvers.thm_factory
-                    }
-
-                    model_params_init["linear_solver"]["options"] = linear_solver_params
 
                 init_model = initialization_class(model_params_init)
 
@@ -578,12 +595,6 @@ if __name__ == "__main__":
                     }
                 )
                 model_class = MainModel
-                if USE_ITERATIVE_SOLVER:
-                    model_class = add_mixin(pp_solvers.IterativeSolverMixin, MainModel)
-                    model_params["linear_solver"] = {
-                        "preconditioner_factory": pp_solvers.thm_factory
-                    }
-                    model_params["linear_solver"]["options"] = linear_solver_params
 
                 model = model_class(model_params)  # Load from initialization from file
                 model.initialization_model = init_model
