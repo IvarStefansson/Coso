@@ -56,9 +56,21 @@ from solution_strategy import SolutionStrategy
 from solver_configurations import linear_solver_params, solver_params
 from wells import WellDataConceptual
 
+NUM_BINS_PER_INTERVAL = 4
+USE_ITERATIVE_SOLVER = False
+if USE_ITERATIVE_SOLVER:
+    if "pp_solvers" not in sys.modules:
+        raise ImportError(
+            "pp_solvers module is required for iterative solvers. Please install"
+            + " pp_solvers or set use_iterative_solver to False."
+        )
+    from solver_configurations import (
+        linear_solver_params,
+        linear_solver_selector_params,
+    )
 LOG_TO_FILE = False
 log_dir = "example_2_logs"
-FINAL_TIME = 5 * pp.YEAR
+FINAL_TIME = 50 * pp.DAY
 SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
 
@@ -96,7 +108,7 @@ class BaseModel(
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
-    ConstraintsCapcrockAndReservoirDepth,
+    # ConstraintsCapcrockAndReservoirDepth,
     ConceptualGeometryTwoFractures,
     HagenPoiseuilleWellPermeability,
     pp.constitutive_laws.CubicLawPermeability,
@@ -339,7 +351,7 @@ def time_managers(schedule: np.ndarray, dt: float, production_period: float):
         atol=1e-5,
     )
     # 5e10 s ≈ 1580 years, which is safely below the production period for all cases.
-    dt_init = 5e10
+    dt_init = 5e9
     time_manager_init = TimeManager(
         schedule=[0, 3 * dt_init],
         dt_init=dt_init,
@@ -361,23 +373,15 @@ def log_summary(velocity: float, period: float, with_production: bool):
     logger.info("=" * 80)
 
 
-NUM_BINS_PER_INTERVAL = 4
-USE_ITERATIVE_SOLVER = True
-if USE_ITERATIVE_SOLVER and "pp_solvers" not in sys.modules:
-    raise ImportError(
-        "pp_solvers module is required for iterative solvers. Please install pp_solvers"
-        + " or set use_iterative_solver to False."
-    )
-
 boundary_velocities = [
     0.0,
-    1.0e-6,
-    2.0e-6,
+    # 1.0e-6,
+    # 2.0e-6,
     # 5.0e-6,
 ]
 with_production = [
     True,
-    False,
+    # False,
 ]
 production_periods = [
     # 0.5,
@@ -401,11 +405,11 @@ if __name__ == "__main__":
                 # Define the time parameters
                 dt = 1e3
                 production_period = period * pp.YEAR
-                domain_size = 4.0e3
-                fracture_size = 5e2
-                refinement = 0.3 if USE_ITERATIVE_SOLVER else 0.8
+                domain_size = 8.0e3
+                fracture_size = 6e2
+                refinement = 0.3 if USE_ITERATIVE_SOLVER else 0.9
                 cell_size = 10e2 * refinement
-                cell_size_fracture = 0.6 * fracture_size * refinement
+                cell_size_fracture = 0.4 * fracture_size * refinement
 
                 schedule, neumann_intervals = create_schedule(
                     production_period,
@@ -443,12 +447,20 @@ if __name__ == "__main__":
 
                     continue
                 log_summary(velocity, period, with_prod)
+                # Re-fitted c_T for T range 20-243 degC (Davatzes & Hickman gradient
+                # 150/20 mK/m): depth-weighted optimal vs IAPWS-IF97 gives c_T = 9.26e-4
+                # K^-1 (RMSE ~9 kg/m3) vs the water table default of 2.07e-4 K^-1 (RMSE
+                # ~66 kg/m3).
+                water_values = {
+                    **pp.fluid_values.water,
+                    "thermal_expansion": 7.8745e-04,  # Fitted to Coso T range (see physical_model.py)
+                }
                 model_params_init = {
                     "plot_title": title,
-                    "domain_sizes": np.full(3, domain_size),
+                    "domain_sizes": np.array([domain_size, domain_size, 3e3]),
                     "material_constants": {
                         "solid": pp.SolidConstants(**solid_values_init),
-                        "fluid": pp.FluidComponent(**pp.fluid_values.water),
+                        "fluid": pp.FluidComponent(**water_values),
                     },
                     "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
                     "time_manager": time_manager_init,
@@ -462,7 +474,8 @@ if __name__ == "__main__":
                     "adaptive_indicator_scaling": 1,  # Scale the indicator adaptively to increase robustness
                     "use_wells": False,
                     "reference_variable_values": pp.ReferenceVariableValues(
-                        temperature=pp.Celsius_to_Kelvin(50)
+                        temperature=pp.Celsius_to_Kelvin(20),
+                        pressure=pp.ATMOSPHERIC_PRESSURE,
                     ),
                     "fracture_file": "coords.txt",
                     "folder_name": folder_name_init,
@@ -488,9 +501,9 @@ if __name__ == "__main__":
                 if with_prod:
                     injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
                     production_p = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
-                    injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(20))
+                    injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(40))
                     # Approximately the expected production from temperature at depth:
-                    production_t = np.full(schedule.shape, 373.15)
+                    production_t = np.full(schedule.shape, 475)
                     # Can be refined to have different schedules for each well.
                     for name in MainModel.injection_well_names.fget(None):
                         model_params[f"{name}_pressures"] = injection_p
@@ -544,11 +557,10 @@ if __name__ == "__main__":
                         "reference_from_initial": True,
                         "material_constants": {
                             "solid": pp.SolidConstants(**solid_values_local),
-                            "fluid": pp.FluidComponent(**pp.fluid_values.water),
+                            "fluid": pp.FluidComponent(**water_values),
                         },
                         "neumann_intervals": neumann_intervals,
                         "well_transition_duration": transition_duration,
-                        "production_well_y_endpoint": 1e3,
                     }
                 )
                 model_class = MainModel

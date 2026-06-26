@@ -55,11 +55,7 @@ from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 from exporting import CosoExporter, GeometryExporting
 from initial_conditions import CopyInitialCondition
 from solution_strategy import SolutionStrategy
-from solver_configurations import (
-    linear_solver_params,
-    solver_params,
-    linear_solver_selector_params,
-)
+from nl_params import solver_params
 from wells import _WellDataBase
 
 LOG_TO_FILE = False
@@ -67,6 +63,19 @@ log_dir = "example_3_logs"
 FINAL_TIME = 2 * pp.YEAR
 SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
+NUM_BINS_PER_INTERVAL = 3
+USE_ITERATIVE_SOLVER = False
+if USE_ITERATIVE_SOLVER:
+    if "pp_solvers" not in sys.modules:
+        raise ImportError(
+            "pp_solvers module is required for iterative solvers. Please install pp_solvers"
+            + " or set use_iterative_solver to False."
+        )
+    from solver_configurations import (
+        linear_solver_params,
+        linear_solver_selector_params,
+    )
+
 
 if LOG_TO_FILE:
     # Create log directory if it doesn't exist
@@ -364,14 +373,6 @@ def log_summary(velocity: float, period: float, with_production: bool):
     logger.info(f"  With production: {with_production}")
     logger.info("=" * 80)
 
-
-NUM_BINS_PER_INTERVAL = 3
-USE_ITERATIVE_SOLVER = False
-if USE_ITERATIVE_SOLVER and "pp_solvers" not in sys.modules:
-    raise ImportError(
-        "pp_solvers module is required for iterative solvers. Please install pp_solvers"
-        + " or set use_iterative_solver to False."
-    )
 
 boundary_velocities = [
     0.0,
