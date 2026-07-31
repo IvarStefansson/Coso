@@ -46,53 +46,6 @@ solver_selector = SolverSelector(
     solver_space=solver_space,
     performance_predictor=assemble_default_performance_predictor(),
 )
-linear_solver_selector_params = pp_solvers.LinearSolverParams(
-    # Pass the solver selector to enable it.
-    solver_selector=solver_selector,
-    # Optionally, pass the manual options. They are merged with the solver
-    # selector's output, but the solver selector takes priority on conflicts.
-    options={
-        "gmres": {
-            "ksp_monitor": None,
-        }
-    },
-)
-linear_solver_params = {
-    # Options for mechanics.
-    # "mechanics_amg": {
-    #     "pc_hypre_boomeramg_strong_threshold": 0.9,
-    #     "pc_hypre_boomeramg_smooth_type": "ilu",
-    #     "pc_hypre_boomeramg_ilu_level": 1,
-    #     # "ksp_type": "gmres",
-    #     # "ksp_rtol": 1e-6,
-    #     # "ksp_monitor": None,
-    #     "pc_hypre_boomeramg_ilu_drop_tol": 1e-5,
-    # },
-    # # Options for the temperature block in the first stage of CPR.
-    # "cpr0_energy": {"pc_type": "hypre", "pc_hypre_type": "ilu"},
-    # # "cpr0_energy": {"pc_type": "ilu"},
-    # "cpr1": {
-    #     "pc_type": "hypre",
-    #     "pc_hypre_type": "ilu",
-    #     "pc_hypre_ilu_level": 1,
-    #     # "pc_hypre_ilu_drop_tol": 1e-5,
-    # },
-    "gmres": {
-        # Options for the outer solver
-        # "ksp_monitor": None,
-        # "ksp_type": "fgmres",
-        "ksp_max_it": 400,
-        # "ksp_gmres_classicalgramschmidt": False,
-    },
-    # "cpr_composite": {
-    #     "ksp_type": "gmres",
-    #     "ksp_rtol": 1e-10,
-    # # },
-    # "interface_flow": {
-    #     "pc_type": "none",
-    #     # "pc_hypre_type": "ilu",
-    #     "ksp_monitor": None,
-    #     "ksp_type": "gmres",
-    #     "ksp_rtol": 1e-12,
-    # },
-}
+linear_solver_selector_params = {}
+
+linear_solver_params = {}

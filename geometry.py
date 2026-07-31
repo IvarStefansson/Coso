@@ -102,7 +102,8 @@ class CosoGeometry(Layers):
                 wells.append(well)
 
         self.well_network = pp.WellNetwork3d(
-            domain=self._domain, wells=wells, parameters={"mesh_size": 25.0}
+            domain=self._domain,
+            wells=wells,  # parameters={"mesh_size": 25.0}
         )
 
     def depth(self, coords: np.ndarray) -> np.ndarray:
@@ -387,7 +388,6 @@ class ConceptualGeometry(TwoEllipticFractures3d, Layers):
 
 class ConceptualGeometryTwoFractures(ConceptualGeometry):
     def set_domain(self):
-
         box = {
             "xmin": 0,
             "xmax": self.domain_sizes()[0],

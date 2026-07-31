@@ -55,7 +55,7 @@ from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 from exporting import CosoExporter, GeometryExporting
 from initial_conditions import CopyInitialCondition
 from solution_strategy import SolutionStrategy
-from nl_params import solver_params
+from nl_params import solver_params, set_nonlinear_solver
 from wells import _WellDataBase
 
 LOG_TO_FILE = False
@@ -64,7 +64,7 @@ FINAL_TIME = 2 * pp.YEAR
 SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
 NUM_BINS_PER_INTERVAL = 3
-USE_ITERATIVE_SOLVER = False
+USE_ITERATIVE_SOLVER = True
 if USE_ITERATIVE_SOLVER:
     if "pp_solvers" not in sys.modules:
         raise ImportError(
@@ -519,25 +519,6 @@ if __name__ == "__main__":
                     "boundary_displacement_velocity": velocity / pp.YEAR,
                     "surface_temperature": pp.Celsius_to_Kelvin(20.0),
                 }
-                if USE_ITERATIVE_SOLVER:
-                    initialization_class = add_mixin(
-                        pp_solvers.IterativeSolverMixin, InitializationModel
-                    )
-                    model_class = add_mixin(pp_solvers.IterativeSolverMixin, MainModel)
-                    if (
-                        solver_selector := False
-                    ):  # Use the solver selector if available.
-                        model_params_init["linear_solver"] = (
-                            linear_solver_selector_params
-                        )
-                    else:
-                        model_params_init["linear_solver"] = {
-                            "preconditioner_factory": pp_solvers.thm_factory
-                        }
-
-                        model_params_init["linear_solver"]["options"] = (
-                            linear_solver_params
-                        )
                 model_params = copy.deepcopy(model_params_init)
                 if with_prod:
                     injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
@@ -553,12 +534,42 @@ if __name__ == "__main__":
                         model_params[f"{name}_pressures"] = production_p
                         model_params[f"{name}_temperatures"] = production_t
 
-                initialization_class = InitializationModel
-
-                init_model = initialization_class(model_params_init)
+                init_model = InitializationModel(model_params_init)
 
                 t0_init = time.perf_counter()
-                pp.ModelRunner(init_model, solver_params).run()
+                nonlinear_solver = set_nonlinear_solver(
+                    iterative_linear_solver=USE_ITERATIVE_SOLVER
+                )
+                init_model.prepare_simulation()
+                grids = [init_model.mdg.subdomains(dim=1)[0]]
+                energy_balance = init_model.energy_balance_equation(grids)
+                variables, _ = (
+                    init_model.equation_system.variable_indexer.filter_by_tags(
+                        model=init_model,
+                        tags=[
+                            pp.solvers.VariableTag(
+                                name="temperature",
+                                defined_on=pp.solvers.OnLowerDimensions(),
+                            )
+                        ],
+                    )
+                )
+                var_indexer = init_model.equation_system.variable_indexer.construct_restricted_indexer(
+                    [variables[0]]
+                )
+                op = init_model.volume_integral(
+                    integrand=pp.ad.Scalar(1), grids=grids, dim=1
+                )
+                op = init_model.solid_internal_energy(grids)
+                op = init_model.fluid_internal_energy(grids)
+                ad = init_model.equation_system.evaluate(
+                    op, derivative=True, variable_indexer=var_indexer
+                )
+                pp.ModelRunner(
+                    init_model,
+                    nonlinear_solver=nonlinear_solver,
+                    params={"prepare_simulation": False},
+                ).run()
                 t1_init = time.perf_counter()
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
@@ -597,16 +608,19 @@ if __name__ == "__main__":
                 )
                 model_class = MainModel
 
-                model = model_class(model_params)  # Load from initialization from file
+                model = MainModel(model_params)  # Load from initialization from file
                 model.initialization_model = init_model
-                solver_params.update(
-                    {
-                        "local_line_search": 1,
-                        "global_line_search": 1,
-                    }
-                )
+                # solver_params.update(
+                #     {
+                #         "local_line_search": 1,
+                #         "global_line_search": 1,
+                #     }
+                # )
                 t0_main = time.perf_counter()
-                pp.ModelRunner(model, solver_params).run()
+                nonlinear_solver = set_nonlinear_solver(
+                    iterative_linear_solver=USE_ITERATIVE_SOLVER
+                )
+                pp.ModelRunner(model, nonlinear_solver=nonlinear_solver).run()
                 t1_main = time.perf_counter()
                 simulation_summaries.append(
                     {
