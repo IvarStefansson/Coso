@@ -1,44 +1,34 @@
-import time
-import porepy as pp
-import numpy as np
-from geometry import LargeGeometry
-from material_parameters import granodiorite_values
-
-from physical_model import PhysicalModel
-from boundary_conditions import (
-    CosoBoundaryConditionsDisplacement,
-    NeumannWellBCsFromSchedule,
-)
-
-from porepy.applications.boundary_conditions.model_boundary_conditions import (
-    BoundaryConditionsMechanicsNeumann,
-    HydrostaticBoundaryPressureValues,
-    LithostaticBoundaryStressValues,
-    ThermalGradientBoundaryTemperatureValues,
-)
-from porepy.applications.initial_conditions.model_initial_conditions import (
-    InitialConditionHydrostaticPressureValues,
-    InitialConditionThermalGradientTemperatureValues,
-)
-from porepy.examples.geothermal_reservoir import (
-    WellBoundaryConditions,
-    NeumannWellBCsFirstTimeInterval,
-)
-from porepy.viz.data_saving_model_mixin import (
-    IterationExporting,
-    FractureDeformationExporting,
-    ResidualExporting,
-)
-from solution_strategy import SolutionStrategy
-from initial_conditions import CopyInitialCondition
-from exporting import CosoExporter, GeometryExporting
-from wells import WellDataConceptual
-from porepy.numerics.nonlinear import line_search
-import diff_tpfa
+import copy
 import logging
 import sys
-import copy
+import time
 from pathlib import Path
+
+import numpy as np
+import porepy as pp
+from porepy.applications.boundary_conditions.model_boundary_conditions import (
+    BoundaryConditionsMechanicsNeumann, HydrostaticBoundaryPressureValues,
+    LithostaticBoundaryStressValues, ThermalGradientBoundaryTemperatureValues)
+from porepy.applications.initial_conditions.model_initial_conditions import (
+    InitialConditionHydrostaticPressureValues,
+    InitialConditionThermalGradientTemperatureValues)
+from porepy.examples.geothermal_reservoir import (
+    NeumannWellBCsFirstTimeInterval, WellBoundaryConditions)
+from porepy.numerics.nonlinear import line_search
+from porepy.viz.data_saving_model_mixin import (FractureDeformationExporting,
+                                                IterationExporting,
+                                                ResidualExporting)
+
+import diff_tpfa
+from boundary_conditions import (CosoBoundaryConditionsDisplacement,
+                                 NeumannWellBCsFromSchedule)
+from exporting import CosoExporter, GeometryExporting
+from geometry import LargeGeometry
+from initial_conditions import CopyInitialCondition
+from material_parameters import granodiorite_values
+from physical_model import PhysicalModel
+from solution_strategy import SolutionStrategy
+from wells import WellDataConceptual
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

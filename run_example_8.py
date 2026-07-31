@@ -1,47 +1,38 @@
+import copy
+import logging
 import re
+import sys
 import time
+from pathlib import Path
+
+import numpy as np
 import pandas
 import porepy as pp
-import numpy as np
-from geometry import CoolingGeometry
-from material_parameters import granodiorite_values
-
-from physical_model import (
-    PhysicalModel,
-    HeterogeneousPermeabilitySpecification,
-    FluidExtensions,
-)
-from boundary_conditions import (
-    CosoBoundaryConditionsDisplacement,
-    OnlyInjectionWellNeumannBCsFromSchedule,
-)
-
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
-    BoundaryConditionsMechanicsNeumann,
-    HydrostaticBoundaryPressureValues,
-    LithostaticBoundaryStressValues,
-    ThermalGradientBoundaryTemperatureValues,
-)
+    BoundaryConditionsMechanicsNeumann, HydrostaticBoundaryPressureValues,
+    LithostaticBoundaryStressValues, ThermalGradientBoundaryTemperatureValues)
 from porepy.applications.initial_conditions.model_initial_conditions import (
     InitialConditionHydrostaticPressureValues,
-    InitialConditionThermalGradientTemperatureValues,
-)
+    InitialConditionThermalGradientTemperatureValues)
 from porepy.examples.geothermal_reservoir import WellBoundaryConditions
-from porepy.viz.data_saving_model_mixin import (
-    IterationExporting,
-    FractureDeformationExporting,
-    ResidualExporting,
-)
-from solution_strategy import SolutionStrategy
-from initial_conditions import CopyInitialCondition
-from exporting import CosoExporter, GeometryExporting, summarize_slip_onset_times
-from wells import WellDataConceptual
 from porepy.numerics.nonlinear import line_search
+from porepy.viz.data_saving_model_mixin import (FractureDeformationExporting,
+                                                IterationExporting,
+                                                ResidualExporting)
+
 import diff_tpfa
-import logging
-import sys
-import copy
-from pathlib import Path
+from boundary_conditions import (CosoBoundaryConditionsDisplacement,
+                                 OnlyInjectionWellNeumannBCsFromSchedule)
+from exporting import (CosoExporter, GeometryExporting,
+                       summarize_slip_onset_times)
+from geometry import CoolingGeometry
+from initial_conditions import CopyInitialCondition
+from material_parameters import granodiorite_values
+from physical_model import (FluidExtensions,
+                            HeterogeneousPermeabilitySpecification,
+                            PhysicalModel)
+from solution_strategy import SolutionStrategy
+from wells import WellDataConceptual
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

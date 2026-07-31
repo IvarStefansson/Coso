@@ -1,19 +1,19 @@
-from typing import Any, Callable
-import porepy as pp
-import numpy as np
-from geometry import CosoGeometry, EllipticFractureGeometry
-from material_parameters import granodiorite_values
-
-from physical_model import PhysicalModel
-from boundary_conditions import CosoBoundaryConditions
-from initial_conditions import InitialCondition, CopyInitialCondition
-from exporting import CosoExporter, IterationExporting
-from porepy.numerics.nonlinear import line_search
-from porepy.models.solution_strategy import TractionStabilization
-
+import copy
 import logging
 import sys
-import copy
+from typing import Any, Callable
+
+import numpy as np
+import porepy as pp
+from porepy.models.solution_strategy import TractionStabilization
+from porepy.numerics.nonlinear import line_search
+
+from boundary_conditions import CosoBoundaryConditions
+from exporting import CosoExporter, IterationExporting
+from geometry import CosoGeometry, EllipticFractureGeometry
+from initial_conditions import CopyInitialCondition, InitialCondition
+from material_parameters import granodiorite_values
+from physical_model import PhysicalModel
 
 logger = logging.getLogger("run_example_1")
 logging.basicConfig(level=logging.INFO)

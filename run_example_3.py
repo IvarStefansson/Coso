@@ -68,8 +68,8 @@ USE_ITERATIVE_SOLVER = False
 if USE_ITERATIVE_SOLVER:
     if "pp_solvers" not in sys.modules:
         raise ImportError(
-            "pp_solvers module is required for iterative solvers. Please install pp_solvers"
-            + " or set use_iterative_solver to False."
+            "pp_solvers module is required for iterative solvers. Please install"
+            + " pp_solvers or set use_iterative_solver to False."
         )
     from solver_configurations import (
         linear_solver_params,
