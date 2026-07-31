@@ -80,13 +80,9 @@ def th_linear_solver_factory():
                                 AMG(groups=mass_balance_groups, key="cpr0_mass"),
                             ]
                         ),
-                        PythonPermutationWrapper(
-                            inner_subsolver=ILU(
-                                groups=energy_balance_groups + mass_balance_groups,
-                                key="cpr1",
-                            ),
-                            permutation_groups=[energy_balance_groups, mass_balance_groups],
-                            key='cpr1_perm',
+                        ILU(
+                            groups=energy_balance_groups + mass_balance_groups,
+                            key="cpr1",
                         ),
                     ]
                 ),
@@ -129,9 +125,13 @@ def set_nonlinear_solver(iterative_linear_solver=False):
                 # "cpr0_mass": {
                 #     "ksp_monitor": None,
                 # },
-                # "cpr1": {
-                #     "ksp_monitor": None,
-                # },
+                "cpr1": {
+                    # "ksp_monitor": None,
+                    "pc_type": "hypre",
+                    "pc_hypre_type": "ilu",
+                    "pc_hypre_ilu_maxiter": 1,
+                    "pc_hypre_ilu_local_reordering": 1,
+                },
             },
         )
     else:
