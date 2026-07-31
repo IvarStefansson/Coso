@@ -50,11 +50,11 @@ class CopyInitialCondition:
         )
         if hasattr(self, "pressure"):
             # Add contribution from pressure
-            p = mod.perturbation_from_reference("pressure", sds)
+            p = mod.pressure(sds).perturbation_from_reference()
             u_faces_ad += discr.bound_pressure(mod.darcy_keyword) @ p
         if hasattr(self, "temperature"):
             # Add contribution from temperature
-            T = mod.perturbation_from_reference("temperature", sds)
+            T = mod.temperature(sds).perturbation_from_reference()
             u_faces_ad += discr.bound_pressure(mod.enthalpy_keyword) @ T
         u_faces = mod.equation_system.evaluate(u_faces_ad)
         assert isinstance(u_faces, np.ndarray)
@@ -77,6 +77,8 @@ class CopyInitialCondition:
         if self.is_well_grid(sd):
             return True
         elif sd.tags.get("parent_well_index", -1) > -1:
+            return True
+        elif sd.dim == 0:
             return True
         return False
 

@@ -561,7 +561,7 @@ class FluidExtensions:
                 * temperature
                 * temperature
             )
-            dp = self.perturbation_from_reference("pressure", domains)
+            dp = self.pressure(domains).perturbation_from_reference()
 
             # Wrap compressibility from fluid class as matrix (left multiplication with dp).
             c = self.fluid_compressibility(domains)

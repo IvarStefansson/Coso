@@ -634,6 +634,9 @@ class CosoExporter:
                 data.append((sd, "well_name", np.full(sd.num_cells, -1)))
             else:
                 well = self.parent_well(sd)
+                if well is None:
+                    data.append((sd, "well_name", np.full(sd.num_cells, -1)))
+                    continue
                 well_tag = int(well.tags["well_name"][:2])
                 data.append((sd, "well_name", np.full(sd.num_cells, well_tag)))
         return data
@@ -677,7 +680,7 @@ class CosoExporter:
         darcy_f = self.evaluate_and_scale(sds, "darcy_flux", "m^3 *s ^-1")
         fluid_f = self.evaluate_and_scale(sds, "fluid_flux", "kg * s^ -1")
         for id, sd in enumerate(sds):
-            if not self.is_well_grid(sd):
+            if not self.is_well_grid(sd) or sd.dim == 1:
                 # Skip non-well subdomains
                 continue
             top_faces = self.domain_boundary_sides(sd).top

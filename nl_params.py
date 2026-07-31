@@ -6,7 +6,18 @@ from pp_solvers.equation_variable_groups import (
     DefaultEquationVariableGroups,
     EquationVariableGroup,
 )
-from pp_solvers.preconditioners import GMRES, ILU, CompositePreconditioner, DiagonalInverter, FieldSplit, FieldSplitSchur, AMG, Identity, LinearSolverConfiguration
+from pp_solvers.preconditioners import (
+    GMRES,
+    ILU,
+    CompositePreconditioner,
+    DiagonalInverter,
+    FieldSplit,
+    FieldSplitSchur,
+    AMG,
+    Identity,
+    LinearSolverConfiguration,
+    PythonPermutationWrapper,
+)
 
 solver_params = {
     "nl_convergence_res_atol": 1e-1,
@@ -69,9 +80,13 @@ def th_linear_solver_factory():
                                 AMG(groups=mass_balance_groups, key="cpr0_mass"),
                             ]
                         ),
-                        ILU(
-                            groups=energy_balance_groups + mass_balance_groups,
-                            key="cpr1",
+                        PythonPermutationWrapper(
+                            inner_subsolver=ILU(
+                                groups=energy_balance_groups + mass_balance_groups,
+                                key="cpr1",
+                            ),
+                            permutation_groups=[energy_balance_groups, mass_balance_groups],
+                            key='cpr1_perm',
                         ),
                     ]
                 ),
