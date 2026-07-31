@@ -14,7 +14,8 @@
                 "maptz.camelcasenavigation",
                 "ms-toolsai.jupyter",
                 "pamaron.pytest-runner",
-                "mutantdino.resourcemonitor"
+                "mutantdino.resourcemonitor",
+                "charliermarsh.ruff"
             ]
         }
     }
