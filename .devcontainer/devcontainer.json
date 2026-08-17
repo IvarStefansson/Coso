@@ -1,5 +1,5 @@
 {
-    "image": "porepy/dev:latest",
+    "image": "porepy/extended:latest",
     // Configure tool-specific properties.
     "customizations": {
         "vscode": {
