@@ -145,7 +145,7 @@ class Foo:
         # the first iteration, and then increase with the number of iterations.
         self.fracture_locking_variable.set_value(
             self.nonlinear_solver_statistics.num_iterations
-            * (self.time_manager.time_index > 1)
+            * (self.time_data.time_index_successful > 1)
         )
 
     def normal_fracture_deformation_equation(

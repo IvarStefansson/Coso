@@ -425,9 +425,9 @@ class CosoBackgroundValues:
         # and time.
         if self.params["use_wells"]:
             x_scaling = coords[0] - self.domain.bounding_box["xmin"]
-            offset_time = 20 * pp.YEAR if self.time_manager.time > 0 else 0
+            offset_time = 20 * pp.YEAR if self.time_data.time > 0 else 0
             values += np.outer(self.boundary_displacement_velocity, x_scaling) * (
-                self.time_manager.time + offset_time
+                self.time_data.time + offset_time
             )
         return values
 

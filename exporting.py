@@ -663,7 +663,7 @@ class CosoExporter:
         """
         if not hasattr(self, "_data_collection_times"):
             self._data_collection_times = []
-        self._data_collection_times.append(self.time_manager.time)
+        self._data_collection_times.append(self.time_data.time)
         data = super().collect_data()
         if data is None:
             data = {}
@@ -955,8 +955,8 @@ class GeometryExporting:
 
     def save_data_time_step(self) -> None:
         super().save_data_time_step()
-        t = self.time_manager.time  # current time
-        scheduled = self.time_manager.schedule[1:]  # scheduled times except t_init
+        t = self.time_data.time  # current time
+        scheduled = self.time_data.schedule[1:]  # scheduled times except t_init
         if not any(np.isclose(t, scheduled)):  # Invert logic of super.
             collected_data = self.collect_data()
             if collected_data is not None:

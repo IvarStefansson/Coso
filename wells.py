@@ -27,8 +27,8 @@ class _WellDataBase:
 
     def wells_active(self) -> bool:
         return (
-            self.time_manager.time
-            > self.time_manager.schedule[self.well_protocol_offset()]
+            self.time_data.time
+            > self.time_data.schedule[self.well_protocol_offset()]
         )
 
     def well_protocol_index(self, data) -> int:
@@ -46,7 +46,7 @@ class _WellDataBase:
         # The schedule is 0, start_time, end day 0, end day 1, end day 2, ...
         # Find the index of the current time in the schedule.
         return int(
-            np.searchsorted(np.arange(data.shape[0]) * pp.DAY, self.time_manager.time)
+            np.searchsorted(np.arange(data.shape[0]) * pp.DAY, self.time_data.time)
             - self.well_protocol_offset()
             - 1
         )

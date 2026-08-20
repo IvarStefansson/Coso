@@ -10,6 +10,7 @@ from initial_conditions import InitialCondition, CopyInitialCondition
 from exporting import CosoExporter, IterationExporting
 from porepy.numerics.nonlinear import line_search
 from porepy.models.solution_strategy import TractionStabilization
+from time_stepping import build_time_stepper, reset_time_io
 
 import logging
 import sys
@@ -137,7 +138,7 @@ class SolutionStrategy:
                 return False
             return True
 
-        if self.time_manager.time < self.time_manager.schedule[1] + 1e-5:
+        if self.time_data.time < self.time_data.schedule[1] + 1e-5:
             variables = []
             for var in self.equation_system.variables:
                 if "well" in var.name:
@@ -213,21 +214,22 @@ if __name__ == "__main__":
     schedule += injection_start_time
     # Add the initial time step to the schedule
     schedule = np.insert(schedule, 0, 0)  # Initial time step at 0
-    time_manager = pp.TimeManager(
+    time_stepper = build_time_stepper(
         schedule=schedule,
         dt_init=dt,
-        dt_min_max=(1, pp.YEAR),
-        iter_max=20,
+        dt_min=1,
+        dt_max=pp.YEAR,
         iter_optimal_range=(5, 12),
         iter_relax_factors=(0.5, 2.0),
         recomp_factor=0.2,
-        recomp_max=5,
+        max_attempts=5,
     )
     dt_init = 10 * pp.YEAR
-    time_manager_init = pp.TimeManager(
-        [0, dt_init],
+    time_stepper_init = build_time_stepper(
+        schedule=[0, dt_init],
         dt_init=dt_init,
-        dt_min_max=(1, 2 * dt_init),
+        dt_min=1,
+        dt_max=2 * dt_init,
         constant_dt=False,
     )
     cell_size = 10e2
@@ -238,7 +240,6 @@ if __name__ == "__main__":
             "solid": pp.SolidConstants(**granodiorite_values),
             "fluid": pp.FluidComponent(**pp.fluid_values.water),
         },
-        "time_manager": time_manager_init,
         "grid_type": "simplex",
         "meshing_arguments": {
             "cell_size": cell_size,
@@ -258,7 +259,6 @@ if __name__ == "__main__":
     model_params = copy.deepcopy(model_params_init)
     model_params.update(
         {
-            "time_manager": time_manager,
             "file_name": "elliptic_fractures_no_stabilization",
             "use_wells": True,
         }
@@ -298,7 +298,8 @@ if __name__ == "__main__":
         },
         "linear_solver": "scipy_sparse",
     }
-    pp.ModelRunner(init_model, solver_params).run()
+    reset_time_io()
+    pp.ModelRunner(init_model, solver_params, time_stepper=time_stepper_init).run()
     init_model.fracture_gap(init_model.mdg.subdomains(dim=2))
     model = CopyModel(model_params)
     model.initialization_model = init_model
@@ -309,5 +310,6 @@ if __name__ == "__main__":
             "nl_convergence_tol_res": 5e0,
         }
     )
-    pp.ModelRunner(model, solver_params).run()
+    reset_time_io()
+    pp.ModelRunner(model, solver_params, time_stepper=time_stepper).run()
     model.plot_well_monitoring()

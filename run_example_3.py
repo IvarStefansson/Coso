@@ -25,7 +25,7 @@ from physical_model import (
     CosoBackgroundValues,
 )
 from diff_tpfa import DarcysLawAdEverywhere
-from time_manager import CosoTimeManager as TimeManager
+from time_stepping import reset_time_io, time_steppers_coso
 
 try:
     import pp_solvers
@@ -333,37 +333,6 @@ def names_from_params(
     return simulation_name, folder_name, folder_name_init, file_name, title
 
 
-def time_managers(schedule: np.ndarray, dt: float, production_period: float):
-    # Target reduction factor per interval boundary crossing.  This is used to compute
-    # the maximum time step size for each interval as a fraction of the interval length.
-    # Can be tailored based on type/length of interval.
-    ks = np.full(schedule.shape[0] - 1, 2.0)
-    dt_min_max = [(1e-2, dt_max / k) for dt_max, k in zip(np.diff(schedule), ks)]
-    time_manager = TimeManager(
-        schedule=schedule,
-        dt_init=dt,
-        dt_min_max=dt_min_max,
-        iter_max=25,
-        iter_optimal_range=(10, 15),
-        iter_relax_factors=(0.6, 2.5),
-        recomp_factor=0.2,
-        recomp_max=10,
-        rtol=1e-20,  # Low rtol due to large time values.
-        atol=1e-5,
-    )
-    # 5e10 s ≈ 1580 years, which is safely below the production period for all cases.
-    dt_init = 5e9
-    time_manager_init = TimeManager(
-        schedule=[0, 3 * dt_init],
-        dt_init=dt_init,
-        dt_min_max=(1, 2 * dt_init),
-        iter_max=20,
-        iter_optimal_range=(5, 12),
-        constant_dt=False,
-    )
-    return time_manager, time_manager_init
-
-
 def log_summary(velocity: float, period: float, with_production: bool):
     # Log run configuration
     logger.info("=" * 80)
@@ -420,8 +389,8 @@ if __name__ == "__main__":
                     initial_shutin_duration=INITIAL_SHUTIN_DURATION,
                     with_production=with_prod,
                 )
-                time_manager, time_manager_init = time_managers(
-                    schedule, dt, production_period
+                time_stepper, time_stepper_init = time_steppers_coso(
+                    schedule, dt, iter_optimal_range=(10, 15)
                 )
                 solid_values_local = copy.deepcopy(granodiorite_values)
                 solid_values_init = copy.deepcopy(solid_values_local)
@@ -485,7 +454,6 @@ if __name__ == "__main__":
                         "fluid": pp.FluidComponent(**water_values),
                     },
                     "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
-                    "time_manager": time_manager_init,
                     "grid_type": "simplex",
                     "meshing_arguments": {
                         "cell_size": cell_size,
@@ -565,10 +533,12 @@ if __name__ == "__main__":
                 ad = init_model.equation_system.evaluate(
                     op, derivative=True, variable_indexer=var_indexer
                 )
+                reset_time_io()
                 pp.ModelRunner(
                     init_model,
                     nonlinear_solver=nonlinear_solver,
                     params={"prepare_simulation": False},
+                    time_stepper=time_stepper_init,
                 ).run()
                 t1_init = time.perf_counter()
                 # Analyze the initialization results to set friction coefficient
@@ -592,7 +562,6 @@ if __name__ == "__main__":
                 solid_values_local["friction_coefficient"] = friction_coeff
                 model_params.update(
                     {
-                        "time_manager": time_manager,
                         "file_name": file_name,
                         "folder_name": folder_name,
                         "initialization": False,
@@ -620,14 +589,17 @@ if __name__ == "__main__":
                 nonlinear_solver = set_nonlinear_solver(
                     iterative_linear_solver=USE_ITERATIVE_SOLVER
                 )
-                pp.ModelRunner(model, nonlinear_solver=nonlinear_solver).run()
+                reset_time_io()
+                pp.ModelRunner(
+                    model, nonlinear_solver=nonlinear_solver, time_stepper=time_stepper
+                ).run()
                 t1_main = time.perf_counter()
                 simulation_summaries.append(
                     {
                         "name": simulation_name,
-                        "init_steps": init_model.time_manager.time_index,
+                        "init_steps": init_model.time_data.time_index_successful,
                         "init_wall_time": t1_init - t0_init,
-                        "main_steps": model.time_manager.time_index,
+                        "main_steps": model.time_data.time_index_successful,
                         "main_wall_time": t1_main - t0_main,
                     }
                 )

@@ -61,9 +61,9 @@ class InitialCosoBoundaryConditions:
         return values.ravel("F") * self.initialization_time_dependency_factor()
 
     def initialization_time_dependency_factor(self) -> float:
-        val = self.time_manager.time / self.time_manager.time_final
+        val = self.time_data.time / self.time_data.schedule[-1]
         self.ad_time_step_factor.set_value(val)
-        return 1  # self.time_manager.time > 0
+        return 1  # self.time_data.time > 0
 
 
 class CosoBoundaryConditionsDisplacement:
@@ -97,9 +97,9 @@ class CosoBoundaryConditionsDisplacement:
             x_scaling = coords[0] - self.domain.bounding_box["xmin"]
             # y_scaling = coords[1] - self.domain.bounding_box["ymin"]
 
-            offset_time = 0 * pp.YEAR if self.time_manager.time > 0 else 0
+            offset_time = 0 * pp.YEAR if self.time_data.time > 0 else 0
             vals_time = np.outer(self.boundary_displacement_velocity, x_scaling) * (
-                self.time_manager.time + offset_time
+                self.time_data.time + offset_time
             )
             values += vals_time.ravel("F")
         return values
@@ -391,7 +391,7 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
         is_neumann = False
         if self.params.get("neumann_intervals") is not None:
             neumann_intervals = self.params["neumann_intervals"]
-            current_time = self.time_manager.time
+            current_time = self.time_data.time
             if np.isclose(current_time, 0.0):
                 # At time zero, we are before the first time interval, so Neumann BCs are active.
                 is_neumann = True
@@ -427,8 +427,8 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
             values[inds] = self.units.convert_units(
                 self.get_well_value(
                     values,
-                    self.time_manager.schedule,
-                    self.time_manager.time,
+                    self.time_data.schedule,
+                    self.time_data.time,
                 ),
                 "Pa",
             )
@@ -457,7 +457,7 @@ class OnlyInjectionWellNeumannBCsFromSchedule(NeumannWellBCsFromSchedule):
             time-dependent temperatures and pressures, with each value being an array of
             size equal to the number of scheduled times in the time manager.
         """
-        num_times = self.time_manager.schedule.size
+        num_times = self.time_data.schedule.size
         protocols: dict[str, dict[str, NDArray[np.float64]]] = {}
         # Initialize protocol dictionary for the well.
         protocols[well_tag] = {}
@@ -527,7 +527,7 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
         dt = self._transition_duration()
         if dt <= 0.0:
             return None
-        t = self.time_manager.time
+        t = self.time_data.time
         for t0 in start_times:
             if t0 < t <= t0 + dt:
                 return (t - t0) / dt

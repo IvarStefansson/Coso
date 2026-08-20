@@ -36,6 +36,7 @@ from porepy.applications.initial_conditions.model_initial_conditions import (
     InitialConditionThermalGradientTemperatureValues,
 )
 from porepy.examples.geothermal_reservoir import WellBoundaryConditions
+from time_stepping import build_time_stepper, reset_time_io
 from porepy.viz.data_saving_model_mixin import (
     FractureDeformationExporting,
     IterationExporting,
@@ -234,26 +235,26 @@ def names_from_params(
 
 
 def time_managers(schedule: np.ndarray, dt: float, production_period: float):
-    time_manager = pp.TimeManager(
+    time_stepper = build_time_stepper(
         schedule=schedule,
         dt_init=dt,
-        dt_min_max=(1e-2, max(dt, production_period / 5)),
-        iter_max=20,
+        dt_min=1e-2,
+        dt_max=max(dt, production_period / 5),
         iter_optimal_range=(5, 12),
         iter_relax_factors=(0.6, 2.0),
         recomp_factor=0.3,
-        recomp_max=10,
+        max_attempts=10,
     )
     dt_init = 5e9  # * pp.YEAR
-    time_manager_init = pp.TimeManager(
-        [0, 5 * dt_init],
+    time_stepper_init = build_time_stepper(
+        schedule=[0, 5 * dt_init],
         dt_init=dt_init,
-        dt_min_max=(1, 2 * dt_init),
-        iter_max=20,
+        dt_min=1,
+        dt_max=2 * dt_init,
         iter_optimal_range=(5, 12),
         constant_dt=False,
     )
-    return time_manager, time_manager_init
+    return time_stepper, time_stepper_init
 
 
 def log_summary(
@@ -326,7 +327,7 @@ if __name__ == "__main__":
                     schedule, neumann_intervals = create_schedule(
                         production_period, num_bins_per_interval=5
                     )
-                    time_manager, time_manager_init = time_managers(
+                    time_stepper, time_stepper_init = time_managers(
                         schedule, dt, production_period
                     )
                     solid_values_local = copy.deepcopy(granodiorite_values)
@@ -367,7 +368,6 @@ if __name__ == "__main__":
                             "fluid": pp.FluidComponent(**pp.fluid_values.water),
                         },
                         "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
-                        "time_manager": time_manager_init,
                         "grid_type": "simplex",
                         "meshing_arguments": {
                             "cell_size": cell_size,
@@ -432,7 +432,10 @@ if __name__ == "__main__":
 
                     init_model = initialization_class(model_params_init)
 
-                    pp.ModelRunner(init_model, solver_params).run()
+                    reset_time_io()
+                    pp.ModelRunner(
+                        init_model, solver_params, time_stepper=time_stepper_init
+                    ).run()
                     # Analyze the initialization results to set friction coefficient
                     sds = init_model.mdg.subdomains(dim=2)
                     traction = init_model.evaluate_and_scale(
@@ -455,7 +458,6 @@ if __name__ == "__main__":
                     solid_values_local["friction_coefficient"] = friction_coeff
                     model_params.update(
                         {
-                            "time_manager": time_manager,
                             "file_name": file_name,
                             "folder_name": folder_name,
                             "initialization": False,
@@ -490,5 +492,6 @@ if __name__ == "__main__":
                             # "nl_convergence_res_atol": 1e0,
                         }
                     )
-                    pp.ModelRunner(model, solver_params).run()
+                    reset_time_io()
+                    pp.ModelRunner(model, solver_params, time_stepper=time_stepper).run()
                     slip_onset_times[simulation_name] = model.slip_onset_times()

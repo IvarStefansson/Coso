@@ -27,6 +27,7 @@ from porepy.applications.initial_conditions.model_initial_conditions import (
     InitialConditionThermalGradientTemperatureValues,
 )
 from porepy.examples.geothermal_reservoir import WellBoundaryConditions
+from time_stepping import build_time_stepper, reset_time_io
 from porepy.viz.data_saving_model_mixin import (
     IterationExporting,
     FractureDeformationExporting,
@@ -234,21 +235,22 @@ if __name__ == "__main__":
                 # schedule += injection_start_time
                 # Add the initial time step to the schedule
                 # schedule = np.insert(schedule, 0, 0)  # Initial time step at 0
-                time_manager = pp.TimeManager(
+                time_stepper = build_time_stepper(
                     schedule=schedule,
                     dt_init=dt,
-                    dt_min_max=(1e-3, max(dt, period / 5)),
-                    iter_max=20,
+                    dt_min=1e-3,
+                    dt_max=max(dt, period / 5),
                     iter_optimal_range=(5, 12),
                     iter_relax_factors=(0.5, 2.0),
                     recomp_factor=0.2,
-                    recomp_max=10,
+                    max_attempts=10,
                 )
                 dt_init = 2e9  # * pp.YEAR
-                time_manager_init = pp.TimeManager(
-                    [0, 4 * dt_init],
+                time_stepper_init = build_time_stepper(
+                    schedule=[0, 4 * dt_init],
                     dt_init=dt_init,
-                    dt_min_max=(1, 2 * dt_init),
+                    dt_min=1,
+                    dt_max=2 * dt_init,
                     constant_dt=False,
                 )
                 fracture_size = 6e2
@@ -274,7 +276,6 @@ if __name__ == "__main__":
                         "fluid": pp.FluidComponent(**pp.fluid_values.water),
                     },
                     "units": pp.Units(m=1.0, kg=1.0e0, K=1.0),
-                    "time_manager": time_manager_init,
                     "grid_type": "simplex",
                     "meshing_arguments": {
                         "cell_size": cell_size,
@@ -367,7 +368,10 @@ if __name__ == "__main__":
 
                 init_model = InitializationModel(model_params_init)
 
-                pp.ModelRunner(init_model, solver_params).run()
+                reset_time_io()
+                pp.ModelRunner(
+                    init_model, solver_params, time_stepper=time_stepper_init
+                ).run()
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
                 traction = init_model.evaluate_and_scale(
@@ -388,7 +392,6 @@ if __name__ == "__main__":
                 df.to_csv(output_path, header=False)
                 model_params.update(
                     {
-                        "time_manager": time_manager,
                         "file_name": file_name,
                         "folder_name": str(folder_name),
                         "use_wells": True,
@@ -412,7 +415,8 @@ if __name__ == "__main__":
                         "residual_line_search_interval_size": 2e-3,
                     }
                 )
-                pp.ModelRunner(model, solver_params).run()
+                reset_time_io()
+                pp.ModelRunner(model, solver_params, time_stepper=time_stepper).run()
                 df = model.plot_well_monitoring(temperature_schedule=schedule)
                 toc = time.time()
                 logger.info(
