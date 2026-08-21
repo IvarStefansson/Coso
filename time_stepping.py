@@ -54,6 +54,8 @@ def time_steppers_coso(
     iter_relax_factors: tuple[float, float] = (0.6, 2.5),
     recomp_factor: float = 0.2,
     max_attempts: int = 10,
+    is_transition: np.ndarray | None = None,
+    dt_start_transition: float = 2.0,
 ) -> tuple[TimeStepper, TimeStepper]:
     """Per-interval time stepper for run_example_2/3's production schedule.
 
@@ -62,6 +64,29 @@ def time_steppers_coso(
     (fixing the previous bug where only interval 0's ``dt_max`` was ever
     applied to the whole simulation), and its own
     :class:`TargetNonlinearIterations` constraint.
+
+    ``dt`` (the uniform ``dt_start``) is a reasonable seed for most intervals, but a
+    comparison of a real run's ``times.json`` against the schedule
+    (``create_schedule``'s ``is_transition`` mask) showed two very different
+    situations hiding behind that one number:
+
+    - At the schedule points where the well BC actually changes (Neumann/Dirichlet
+      switch, ramp start/end -- ``is_transition[i] is True``), ``dt=1e3`` was
+      routinely too large: the solver burned several failed Newton solves shrinking
+      it via ``recomp_factor`` before finding a working step size (down to ~1s in
+      the worst observed case).
+    - At schedule points that only exist as ``num_bins_per_interval`` bin edges for
+      post-processing (``is_transition[i] is False``), the physics does not change
+      at all, yet ``dt`` was still reset all the way down to ``1e3`` and had to
+      re-grow from scratch -- costing ~10 wasted converging steps to climb back to
+      the multi-million-second scale the previous interval had already reached.
+
+    Passing ``is_transition`` (aligned with ``schedule``, from ``create_schedule``)
+    lets each interval pick a ``dt_start`` matching which of these two situations it
+    is in: ``dt_start_transition`` (small) at real transitions, and this interval's
+    own ``dt_max`` (i.e. start at the target ceiling right away) at bin-only edges.
+    If ``is_transition`` is ``None``, every interval keeps using the uniform ``dt``
+    as before.
     """
     # Target reduction factor per interval boundary crossing. This sets the
     # maximum time step size for each interval as a fraction of the interval
@@ -70,10 +95,17 @@ def time_steppers_coso(
     interval_lengths = np.diff(schedule)
     decrease_factor, increase_factor = iter_relax_factors
 
+    if is_transition is None:
+        dt_starts = np.full(schedule.shape[0] - 1, dt)
+    else:
+        dt_starts = np.where(
+            is_transition[:-1], dt_start_transition, interval_lengths / ks
+        )
+
     intervals = [
         TimeInterval.create(
             t_start=t_start,
-            dt_start=dt,
+            dt_start=dt_start,
             dt_min=1e-2,
             dt_max=length / k,
             constraints=[
@@ -88,8 +120,8 @@ def time_steppers_coso(
             ],
             name=f"interval_{i}",
         )
-        for i, (t_start, length, k) in enumerate(
-            zip(schedule[:-1], interval_lengths, ks)
+        for i, (t_start, length, k, dt_start) in enumerate(
+            zip(schedule[:-1], interval_lengths, ks, dt_starts)
         )
     ]
     time_stepper = TimeStepper(
