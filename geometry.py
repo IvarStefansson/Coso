@@ -879,6 +879,124 @@ class FaultPlaneGeometry(CosoGeometry):
         return recovered
 
 
+class SingleFractureDiagnosticGeometry(CosoGeometry):
+    """Minimal diagnostic geometry for fast solver/time-stepper debugging.
+
+    Reuses :meth:`CosoGeometry.set_well_network` unmodified, so well
+    trajectories match example 3 exactly (real data from
+    ``data/wellbores.xlsx``, e.g. ``"68-20RD"`` injection and ``"16A-20"`` /
+    ``"16B-20"`` production). Replaces the full real fault network used by
+    :class:`FaultPlaneGeometry` with a single synthetic rectangular fracture,
+    explicitly constructed to intersect both the injection well and the first
+    production well trajectory at one target depth. The domain is sized
+    tightly around the wells and fracture instead of the full example-3
+    extent, so meshing and solves are much cheaper during debugging.
+
+    Not intended to reproduce example 3's physics quantitatively -- only to
+    exercise the same well/fracture/boundary-condition code paths cheaply.
+
+    Optional params:
+        diagnostic_fracture_depth_fraction: Fraction (0-1) of the way down the
+            shallower of the two wells at which the fracture intersects both
+            wells (default 0.7).
+        diagnostic_fracture_lateral_margin: Distance (m) the fracture extends
+            beyond each well's intersection point, in-plane (default 3e2).
+        diagnostic_fracture_half_height: Half the vertical extent (m) of the
+            fracture (default 1e3).
+        diagnostic_domain_margin: Padding (m) added around the wells and
+            fracture to form the domain bounding box (default 3e2).
+    """
+
+    def _well_segment(self, well_name: str) -> tuple[np.ndarray, np.ndarray]:
+        """(top, bottom) points of a straight-line well trajectory.
+
+        Matches the ``straight_wells=True`` convention used by
+        :meth:`CosoGeometry.set_well_network`.
+        """
+        pth = sys.path[0]
+        fn = f"{pth}/data/wellbores.xlsx"
+        with pd.ExcelFile(fn) as xls:
+            df = pd.read_excel(xls, sheet_name=well_name, usecols=[3, 4, 5], skiprows=1)
+        # File order is y, x, z -> convert to x, y, z, and flip z to Coso convention.
+        df = df.iloc[:, [1, 0, 2]]
+        pts = df.values.T.astype(float)
+        pts[2] *= -1
+        top = pts[:, 0].copy()
+        top[2] = 0.0
+        bottom = pts[:, np.argmin(pts[2])].copy()
+        return top, bottom
+
+    def _diagnostic_geometry_data(self) -> tuple[np.ndarray, np.ndarray]:
+        """Cache and return (fracture_corners, well_bbox_points)."""
+        if hasattr(self, "_diag_corners"):
+            return self._diag_corners, self._diag_wells_bbox
+
+        injection_well = self.injection_well_names[0]
+        production_well = self.production_well_names[0]
+        top_a, bot_a = self._well_segment(injection_well)
+        top_b, bot_b = self._well_segment(production_well)
+
+        # Target depth: a fixed fraction of the way down the shallower well, so
+        # it is guaranteed to lie within both wells' depth range.
+        depth_fraction = self.params.get("diagnostic_fracture_depth_fraction", 0.7)
+        shallower_bottom_z = max(bot_a[2], bot_b[2])  # less negative == shallower
+        target_z = depth_fraction * shallower_bottom_z
+
+        def point_at_depth(top: np.ndarray, bottom: np.ndarray, z: float) -> np.ndarray:
+            t = (top[2] - z) / (top[2] - bottom[2])
+            return top + t * (bottom - top)
+
+        point_a = point_at_depth(top_a, bot_a, target_z)
+        point_b = point_at_depth(top_b, bot_b, target_z)
+
+        # Extend beyond the well intersection points so they are not right at
+        # the fracture's edge, and give it a generous vertical extent.
+        lateral_margin = self.params.get("diagnostic_fracture_lateral_margin", 3e2)
+        half_height = self.params.get("diagnostic_fracture_half_height", 1e3)
+        direction = point_b - point_a
+        direction[2] = 0.0
+        direction /= np.linalg.norm(direction)
+        point_a_ext = point_a - lateral_margin * direction
+        point_b_ext = point_b + lateral_margin * direction
+
+        up = np.array([0.0, 0.0, half_height])
+        corners = np.array(
+            [
+                point_a_ext + up,
+                point_b_ext + up,
+                point_b_ext - up,
+                point_a_ext - up,
+            ]
+        ).T
+        wells_bbox = np.array([top_a, bot_a, top_b, bot_b]).T
+
+        self._diag_corners = corners
+        self._diag_wells_bbox = wells_bbox
+        return corners, wells_bbox
+
+    def set_domain(self) -> None:
+        corners, wells_bbox = self._diagnostic_geometry_data()
+        all_pts = np.hstack([corners, wells_bbox])
+        margin = self.params.get("diagnostic_domain_margin", 3e2)
+        box = {
+            "xmin": all_pts[0].min() - margin,
+            "xmax": all_pts[0].max() + margin,
+            "ymin": all_pts[1].min() - margin,
+            "ymax": all_pts[1].max() + margin,
+            "zmin": all_pts[2].min() - margin,
+            "zmax": all_pts[2].max() + margin,
+        }
+        self._domain = pp.Domain(bounding_box=box)
+
+    def set_fractures(self) -> None:
+        corners, _ = self._diagnostic_geometry_data()
+        self._fractures = [pp.PlaneFracture(corners, check_convexity=False)]
+
+    def fracture_names(self) -> list[str]:
+        """Stable names for loaded fractures; required by some exporters."""
+        return ["diagnostic_fracture"]
+
+
 if __name__ == "__main__":
 
     class MockModel(
