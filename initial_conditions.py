@@ -76,8 +76,6 @@ class CopyInitialCondition:
             sd = g
         if self.is_well_grid(sd):
             return True
-        elif sd.tags.get("parent_well_index", -1) > -1:
-            return True
         elif sd.dim == 0:
             return True
         return False

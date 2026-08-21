@@ -416,7 +416,7 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
         # mixin class.
         values = super().bc_values_darcy_flux(bg)  # type: ignore[misc]
         if self.is_well_grid(sd) and "darcy_fluxes" in self.well_protocol_variables():
-            well = self.well_network.wells[sd.tags["parent_well_index"]]
+            well = self.well_network.wells[sd.well_num]
             well_tag = well.tags["well_name"]
             values = self.well_protocols(well_tag, "darcy_fluxes")
             # Find indices of the well boundary sides.

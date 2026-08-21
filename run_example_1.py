@@ -130,10 +130,7 @@ class SolutionStrategy:
                 g = self.mdg.interface_to_subdomain_pair(d)[0]
             else:
                 g = d
-            if self.is_well(g):
-                # Skip well equations
-                return False
-            elif g.tags.get("parent_well_index", -1) > -1:
+            if self.is_well_grid(g):
                 # Skip well equations
                 return False
             return True

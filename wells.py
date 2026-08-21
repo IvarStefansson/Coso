@@ -21,14 +21,13 @@ class _WellDataBase:
             The parent well of the subdomain.
 
         """
-        if sd.dim == 1 and "parent_well_index" in sd.tags:
-            return self.well_network.wells[sd.tags["parent_well_index"]]
+        if self.is_well_grid(sd):
+            return self.well_network.wells[sd.well_num]
         return None
 
     def wells_active(self) -> bool:
         return (
-            self.time_data.time
-            > self.time_data.schedule[self.well_protocol_offset()]
+            self.time_data.time > self.time_data.schedule[self.well_protocol_offset()]
         )
 
     def well_protocol_index(self, data) -> int:
