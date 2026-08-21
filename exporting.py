@@ -125,7 +125,7 @@ def plot_flow_rate_and_fracture_displacement(
         if semilogy:
             ax2.semilogy(
                 time,
-                fracture_subset["displacement_jump"],
+                fracture_subset["displacement_jump_increment"],
                 color=color,
                 linewidth=2,
                 markersize=4,
@@ -136,7 +136,7 @@ def plot_flow_rate_and_fracture_displacement(
         else:
             ax2.plot(
                 time,
-                fracture_subset["displacement_jump"],
+                fracture_subset["displacement_jump_increment"],
                 color=color,
                 linewidth=2,
                 markersize=4,
@@ -328,7 +328,7 @@ def plot_fracture_displacement(
         if semilogy:
             ax.semilogy(
                 fracture_subset["time"],
-                fracture_subset["displacement_jump"],
+                fracture_subset["displacement_jump_increment"],
                 color=color,
                 linewidth=2,
                 marker="o",
@@ -339,7 +339,7 @@ def plot_fracture_displacement(
         else:
             ax.plot(
                 fracture_subset["time"],
-                fracture_subset["displacement_jump"],
+                fracture_subset["displacement_jump_increment"],
                 color=color,
                 linewidth=2,
                 marker="o",
@@ -471,9 +471,9 @@ class CosoExporter:
         sliding_onset_times = {}
         for time, data in zip(self._data_collection_times, self.results):
             for name, variables in data.items():
-                if not name.startswith("Fracture"):
+                if "seismic_moment" not in variables:
                     continue
-                jump = variables["displacement_jump"]
+                jump = variables["displacement_jump_increment"]
                 if jump > JUMP_RANGE[0]:
                     if name not in sliding_onset_times:
                         sliding_onset_times[name] = time
@@ -680,7 +680,7 @@ class CosoExporter:
         darcy_f = self.evaluate_and_scale(sds, "darcy_flux", "m^3 *s ^-1")
         fluid_f = self.evaluate_and_scale(sds, "fluid_flux", "kg * s^ -1")
         for id, sd in enumerate(sds):
-            if not self.is_well_grid(sd) or sd.dim == 1:
+            if not self.is_well_grid(sd):
                 # Skip non-well subdomains
                 continue
             top_faces = self.domain_boundary_sides(sd).top
@@ -800,7 +800,11 @@ class CosoExporter:
         fracture_records = []
         for time, data in zip(self._data_collection_times, self.results):
             for name, variables in data.items():
-                if name.startswith("Fracture"):
+                # Classify by which fracture-specific field is present rather than by
+                # name prefix: fracture names are not always "Fracture N" (e.g.
+                # FaultPlaneGeometry uses real fault IDs like "0000"), so a prefix
+                # check would silently misfile fracture data as well data.
+                if "seismic_moment" in variables:
                     record = {"time": time, "fracture_id": name}
                     record.update(variables)
                     fracture_records.append(record)
