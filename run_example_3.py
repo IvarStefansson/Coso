@@ -456,8 +456,8 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 8.0e3
                 fracture_size = 6e2
-                refinement = 2.9 if USE_ITERATIVE_SOLVER else 3.0
-                cell_size = 12e2 * refinement
+                refinement = 0.2 if USE_ITERATIVE_SOLVER else 3.0
+                cell_size = 15e2 * refinement
                 cell_size_fracture = 0.4 * fracture_size * refinement
 
                 schedule, neumann_intervals, is_transition = create_schedule(
