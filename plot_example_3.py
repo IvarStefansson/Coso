@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from exporting import plot_fracture_displacement
+from exporting import JUMP_RANGE, plot_fracture_displacement
 
 
 def _monotonic_time_mask(time: pd.Series) -> np.ndarray:
@@ -71,6 +71,28 @@ def plot_all_fracture_displacements(
     fracture-count-agnostic (it discovers ``fracture_id`` values from the CSV).
     """
     return plot_fracture_displacement(csv_dir, file_base, title=title, semilogy=semilogy)
+
+
+def compute_slip_onset_times(
+    csv_dir: Path | str, file_base: str
+) -> dict[str, float | None]:
+    """First time each fracture's displacement jump increment exceeds ``JUMP_RANGE[0]``.
+
+    Standalone, CSV-based equivalent of ``CosoExporter.slip_onset_times()`` (which
+    requires a live model with ``self.results`` populated in memory during a run, so
+    can't be used for post-hoc analysis of a finished/killed run). Same threshold
+    convention: a fracture with no time step ever exceeding the threshold gets
+    ``None``, not the last/max time.
+    """
+    _, fracture_df = load_monitoring_data(csv_dir, file_base)
+    onset_times: dict[str, float | None] = {}
+    for fracture_id, group in fracture_df.groupby("fracture_id"):
+        group = group.sort_values("time")
+        slipping = group[group["displacement_jump_increment"] > JUMP_RANGE[0]]
+        onset_times[fracture_id] = (
+            float(slipping["time"].iloc[0]) if not slipping.empty else None
+        )
+    return onset_times
 
 
 def plot_wells(csv_dir: Path | str, file_base: str, title: str | None = None) -> None:
@@ -253,6 +275,12 @@ def plot_example_3_results(
 
     plot_wells(csv_dir, file_name, title=title)
     plot_all_fracture_displacements(csv_dir, file_name, title=title, semilogy=semilogy)
+
+    onset_times = compute_slip_onset_times(csv_dir, file_name)
+    print(f"Slip onset times for {title}:")
+    for fracture_id, onset in sorted(onset_times.items()):
+        label = f"{onset:.3e} s" if onset is not None else "no slip observed"
+        print(f"  {fracture_id}: {label}")
 
     well_df, _ = load_monitoring_data(csv_dir, file_name)
     well_names = well_df["well_name"].unique().tolist()
