@@ -2,22 +2,29 @@ import logging
 import porepy as pp
 import pp_solvers
 
-from pp_solvers.equation_variable_groups import (
-    DefaultEquationVariableGroups,
-    EquationVariableGroup,
-)
-from pp_solvers.preconditioners import (
-    GMRES,
-    ILU,
-    CompositePreconditioner,
-    DiagonalInverter,
-    FieldSplit,
-    FieldSplitSchur,
-    AMG,
-    Identity,
-    LinearSolverConfiguration,
-    PythonPermutationWrapper,
-)
+try:
+    # These are only needed for the iterative-solver preconditioner factory
+    # (th_linear_solver_factory / set_nonlinear_solver(iterative_linear_solver=True)).
+    # Guarded so that importing this module still works with a pp_solvers version
+    # where this API has drifted, as long as the iterative solver path isn't used.
+    from pp_solvers.equation_variable_groups import (
+        DefaultEquationVariableGroups,
+        EquationVariableGroup,
+    )
+    from pp_solvers.preconditioners import (
+        GMRES,
+        ILU,
+        CompositePreconditioner,
+        DiagonalInverter,
+        FieldSplit,
+        FieldSplitSchur,
+        AMG,
+        Identity,
+        LinearSolverConfiguration,
+        PythonPermutationWrapper,
+    )
+except ImportError:
+    pass
 
 solver_params = {
     "nl_convergence_res_atol": 1e-1,
@@ -177,7 +184,7 @@ def set_nonlinear_solver(iterative_linear_solver=False):
                     pp.solvers.DefaultVariableTags.contact_traction,
                 ],
             ),
-            pp.solvers.ConstraintLineSearchNonlinearSolver(
+            pp.solvers.NewtonSolver(
                 linear_solver=linear_solver_pT,
                 params={
                     "nl_max_iterations": 25,
