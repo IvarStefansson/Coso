@@ -46,10 +46,19 @@ def _monotonic_time_mask(time: pd.Series) -> np.ndarray:
 def load_monitoring_data(
     csv_dir: Path | str, file_base: str
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load the well and fracture monitoring CSVs written by ``save_results()``."""
+    """Load the well and fracture monitoring CSVs written by ``save_results()``.
+
+    Fracture IDs from ``FaultPlaneGeometry`` are zero-padded numeric strings (e.g.
+    ``"0000"``). Without an explicit dtype, pandas infers these as integers on
+    read, silently dropping the leading zeros (cosmetic only -- labels stop
+    matching the ``point_cloud_clusters/*.csv`` filenames, but grouping/filtering
+    by the column still works since it stays self-consistent).
+    """
     csv_dir = Path(csv_dir)
-    well_df = pd.read_csv(csv_dir / f"{file_base}.csv")
-    fracture_df = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
+    well_df = pd.read_csv(csv_dir / f"{file_base}.csv", dtype={"well_name": str})
+    fracture_df = pd.read_csv(
+        csv_dir / f"{file_base}_fractures.csv", dtype={"fracture_id": str}
+    )
     return well_df, fracture_df
 
 

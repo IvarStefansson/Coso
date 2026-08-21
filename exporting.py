@@ -40,9 +40,12 @@ def plot_flow_rate_and_fracture_displacement(
     """
     separate_legend = True
     csv_dir = Path(csv_dir)
-    # Read CSV files
-    well_data = pd.read_csv(csv_dir / f"{file_base}.csv")
-    fracture_data = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
+    # Read CSV files. Explicit dtype avoids pandas silently dropping leading zeros
+    # from numeric-looking fracture/well IDs (e.g. FaultPlaneGeometry's "0000").
+    well_data = pd.read_csv(csv_dir / f"{file_base}.csv", dtype={"well_name": str})
+    fracture_data = pd.read_csv(
+        csv_dir / f"{file_base}_fractures.csv", dtype={"fracture_id": str}
+    )
 
     # Process well data
     well_data_filtered = well_data[well_data["well_name"] == well_name].copy()
@@ -265,8 +268,12 @@ def plot_fracture_displacement(
         file_base: Base name for the CSV file (default: "example_3").
     """
     csv_dir = Path(csv_dir)
-    # Read CSV file for fractures
-    fracture_data = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
+    # Read CSV file for fractures. Explicit dtype avoids pandas silently dropping
+    # leading zeros from numeric-looking fracture IDs (e.g. FaultPlaneGeometry's
+    # "0000").
+    fracture_data = pd.read_csv(
+        csv_dir / f"{file_base}_fractures.csv", dtype={"fracture_id": str}
+    )
 
     # Get time data from fracture data
     time = fracture_data["time"].unique()
