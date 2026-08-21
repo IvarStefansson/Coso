@@ -481,6 +481,47 @@ class HeterogeneousPermeabilitySpecification:
         # return np.logical_and.reduce((zone_x, zone_y, zone_z))
 
 
+class HeterogeneousFrictionCoefficient:
+    """Mixin giving each fracture its own (back-computed) friction coefficient.
+
+    Follows the same pattern as :class:`HeterogeneousPermeabilitySpecification`
+    above: a plain mixin sharing ``self`` with the model, gated by
+    ``params["heterogeneous_friction_coefficient"]``. Expects
+    ``params["friction_coefficients"]`` to be a ``{str(frac_num): value}`` mapping
+    covering every fracture, e.g. from
+    :func:`run_example_3.compute_friction_coefficients_each_fracture`.
+    """
+
+    def friction_coefficient(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Friction coefficient.
+
+        Parameters:
+            subdomains: List of subdomains where the friction coefficient is defined.
+
+        Returns:
+            Cell-wise friction coefficient operator.
+
+        """
+        if not self.params.get("heterogeneous_friction_coefficient", False):
+            return super().friction_coefficient(subdomains)
+        if len(subdomains) == 0:
+            return pp.wrap_as_dense_ad_array(0, size=0)
+        friction_coefficients = self.params["friction_coefficients"]
+        vals = []
+        for sd in subdomains:
+            key = str(sd.frac_num)
+            if key not in friction_coefficients:
+                raise KeyError(
+                    f"No heterogeneous friction coefficient found for fracture "
+                    f"frac_num={sd.frac_num}. 'friction_coefficients' must cover "
+                    "every fracture subdomain passed to friction_coefficient()."
+                )
+            vals.append(np.full(sd.num_cells, friction_coefficients[key]))
+        return pp.wrap_as_dense_ad_array(
+            np.hstack(vals), name="heterogeneous_friction_coefficient"
+        )
+
+
 class FluidExtensions:
     def viscosity_of_phase(
         self, phase: pp.Phase[pp.FluidComponent]

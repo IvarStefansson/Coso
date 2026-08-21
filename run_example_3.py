@@ -1,4 +1,6 @@
+import json
 import shutil
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -19,6 +21,7 @@ from porepy.models.contact_mechanics import (
 )
 from material_parameters import granodiorite_values
 from physical_model import (
+    HeterogeneousFrictionCoefficient,
     HeterogeneousPermeabilitySpecification,
     PhysicalModel,
     HagenPoiseuilleWellPermeability,
@@ -161,6 +164,7 @@ class MainModel(
     WellBoundaryConditions,
     CosoBoundaryConditionsDisplacement,
     HeterogeneousPermeabilitySpecification,
+    HeterogeneousFrictionCoefficient,
     BaseModel,
 ):
     """Main model for the Coso geothermal reservoir."""
@@ -359,6 +363,65 @@ def log_summary(velocity: float, period: float, with_production: bool):
     logger.info("=" * 80)
 
 
+def _json_default(obj):
+    """Best-effort fallback encoder for values json.dump can't handle natively.
+
+    Used for dumping run configuration (which mixes plain Python/numpy values with
+    porepy dataclass-like objects such as SolidConstants) for later reference. Never
+    raises: anything not otherwise handled falls back to its repr string, so this can
+    always be used safely without risking losing the whole dump over one odd value.
+    """
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, Path):
+        return str(obj)
+    if callable(obj):
+        return repr(obj)
+    if hasattr(obj, "__dict__"):
+        return vars(obj)
+    try:
+        return repr(obj)
+    except Exception:
+        return f"<unrepresentable {type(obj).__name__}>"
+
+
+def save_run_config(folder_name: str, **config) -> None:
+    """Dump a best-effort JSON snapshot of a run's configuration for later reference.
+
+    Not a faithful reconstruction recipe (some values, e.g. callables, only survive
+    as their repr), but enough to see at a glance what parameters, schedule, and
+    material values a given output folder corresponds to.
+    """
+    path = Path(folder_name) / "run_config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        json.dump(config, f, indent=2, default=_json_default)
+
+
+def back_compute_friction_coefficient(init_model, sds, eps=1e-3):
+    traction = init_model.evaluate_and_scale(sds, "contact_traction", "-").reshape(
+        (3, -1), order="F"
+    )
+    friction_coeff = (
+        np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + eps
+    )
+    return friction_coeff
+
+
+def compute_friction_coefficients_each_fracture(init_model, eps=1e-3):
+    friction_coeffs = {}
+    for sd in init_model.mdg.subdomains(dim=2):
+        friction_coeffs[str(sd.frac_num)] = back_compute_friction_coefficient(
+            init_model, [sd], eps
+        )
+    return friction_coeffs
+
+
+HETEROGENEOUS_FRICTION_COEFFICIENTS = True
 boundary_velocities = [
     0.0,
     1.0e-6,
@@ -489,6 +552,8 @@ if __name__ == "__main__":
                     ),
                     "fracture_file": "coords.txt",
                     "folder_name": folder_name_init,
+                    "solver_statistics_file_name": Path(folder_name_init)
+                    / "solver_statistics.json",
                     "initialization": True,
                     "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
                     "fracture_params": {  # Other options are available in the geometry mixin.
@@ -522,6 +587,14 @@ if __name__ == "__main__":
                         model_params[f"{name}_pressures"] = production_p
                         model_params[f"{name}_temperatures"] = production_t
 
+                save_run_config(
+                    folder_name_init,
+                    model_params=model_params_init,
+                    schedule=schedule,
+                    neumann_intervals=neumann_intervals,
+                    is_transition=is_transition,
+                    dt=dt,
+                )
                 init_model = InitializationModel(model_params_init)
 
                 t0_init = time.perf_counter()
@@ -563,25 +636,37 @@ if __name__ == "__main__":
                 t1_init = time.perf_counter()
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
-                traction = init_model.evaluate_and_scale(
-                    sds, "contact_traction", "-"
-                ).reshape((3, -1), order="F")
-                friction_coeff = (
-                    np.max(
-                        np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])
+                if HETEROGENEOUS_FRICTION_COEFFICIENTS:
+                    friction_coeffs = compute_friction_coefficients_each_fracture(
+                        init_model, eps=5e-3
                     )
-                    + 0.001
-                )
-                logger.info("=" * 80)
-                logger.info(
-                    "Determined friction coefficient from initialization: "
-                    + f"{friction_coeff:.4f}"
-                )
-                logger.info("=" * 80)
+                    model_params["friction_coefficients"] = friction_coeffs
+                    logger.info("=" * 80)
+                    logger.info(
+                        "Determined per-fracture friction coefficients from "
+                        f"initialization: {friction_coeffs}"
+                    )
+                    logger.info("=" * 80)
+                    # Used only as a fallback (e.g. by super().friction_coefficient()
+                    # for any subdomain not covered by 'friction_coefficients'), so it
+                    # should still reflect the back-computed values rather than the raw
+                    # material default.
+                    solid_values_local["friction_coefficient"] = max(
+                        friction_coeffs.values()
+                    )
+                else:
+                    friction_coeff = back_compute_friction_coefficient(init_model, sds)
+                    logger.info("=" * 80)
+                    logger.info(
+                        "Determined friction coefficient from initialization: "
+                        + f"{friction_coeff:.4f}"
+                    )
+                    logger.info("=" * 80)
 
-                solid_values_local["friction_coefficient"] = friction_coeff
+                    solid_values_local["friction_coefficient"] = friction_coeff
                 model_params.update(
                     {
+                        "heterogeneous_friction_coefficient": HETEROGENEOUS_FRICTION_COEFFICIENTS,
                         "file_name": file_name,
                         "folder_name": folder_name,
                         "initialization": False,
@@ -593,10 +678,21 @@ if __name__ == "__main__":
                         },
                         "neumann_intervals": neumann_intervals,
                         "well_transition_duration": transition_duration,
+                        "solver_statistics_file_name": Path(folder_name)
+                        / "solver_statistics.json",
                     }
                 )
                 model_class = MainModel
 
+                save_run_config(
+                    folder_name,
+                    model_params=model_params,
+                    schedule=schedule,
+                    neumann_intervals=neumann_intervals,
+                    is_transition=is_transition,
+                    dt=dt,
+                    friction_coefficient=friction_coeff,
+                )
                 model = MainModel(model_params)  # Load from initialization from file
                 model.initialization_model = init_model
                 # solver_params.update(
