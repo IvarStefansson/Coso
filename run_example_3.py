@@ -58,7 +58,7 @@ from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 from exporting import CosoExporter, GeometryExporting
 from initial_conditions import CopyInitialCondition
 from solution_strategy import SolutionStrategy
-from nl_params import solver_params, set_nonlinear_solver
+from nl_params import set_nonlinear_solver
 from wells import _WellDataBase
 
 LOG_TO_FILE = False
@@ -402,21 +402,21 @@ def save_run_config(folder_name: str, **config) -> None:
         json.dump(config, f, indent=2, default=_json_default)
 
 
-def back_compute_friction_coefficient(init_model, sds, eps=1e-3):
+def back_compute_friction_coefficient(init_model, sds, floor_value=1e-3, eps=1e-3):
     traction = init_model.evaluate_and_scale(sds, "contact_traction", "-").reshape(
         (3, -1), order="F"
     )
     friction_coeff = (
         np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + eps
     )
-    return friction_coeff
+    return np.maximum(friction_coeff, floor_value)
 
 
-def compute_friction_coefficients_each_fracture(init_model, eps=1e-3):
+def compute_friction_coefficients_each_fracture(init_model, floor_value=1e-3, eps=1e-3):
     friction_coeffs = {}
     for sd in init_model.mdg.subdomains(dim=2):
         friction_coeffs[str(sd.frac_num)] = back_compute_friction_coefficient(
-            init_model, [sd], eps
+            init_model, [sd], floor_value=floor_value, eps=eps
         )
     return friction_coeffs
 
@@ -456,8 +456,8 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 8.0e3
                 fracture_size = 6e2
-                refinement = 0.2 if USE_ITERATIVE_SOLVER else 3.0
-                cell_size = 15e2 * refinement
+                refinement = 1.2 if USE_ITERATIVE_SOLVER else 3.0
+                cell_size = 10e2 * refinement
                 cell_size_fracture = 0.4 * fracture_size * refinement
 
                 schedule, neumann_intervals, is_transition = create_schedule(
@@ -478,7 +478,7 @@ if __name__ == "__main__":
                 solid_values_local = copy.deepcopy(granodiorite_values)
                 solid_values_init = copy.deepcopy(solid_values_local)
                 solid_values_init["permeability"] *= (
-                    1e3  # More permeable for faster equilibration during initialization.
+                    1e2  # More permeable for faster equilibration during initialization.
                 )
                 simulation_name, folder_name, folder_name_init, file_name, title = (
                     names_from_params(velocity, period, with_prod, USE_ITERATIVE_SOLVER)
@@ -636,9 +636,10 @@ if __name__ == "__main__":
                 t1_init = time.perf_counter()
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
+                minimum_friction = 0.4  # Physical lower bound for granodiorite SOURCE
                 if HETEROGENEOUS_FRICTION_COEFFICIENTS:
                     friction_coeffs = compute_friction_coefficients_each_fracture(
-                        init_model, eps=5e-3
+                        init_model, floor_value=minimum_friction, eps=5e-3
                     )
                     model_params["friction_coefficients"] = friction_coeffs
                     logger.info("=" * 80)
@@ -655,7 +656,9 @@ if __name__ == "__main__":
                         friction_coeffs.values()
                     )
                 else:
-                    friction_coeff = back_compute_friction_coefficient(init_model, sds)
+                    friction_coeff = back_compute_friction_coefficient(
+                        init_model, sds, floor_value=minimum_friction
+                    )
                     logger.info("=" * 80)
                     logger.info(
                         "Determined friction coefficient from initialization: "
@@ -691,7 +694,9 @@ if __name__ == "__main__":
                     neumann_intervals=neumann_intervals,
                     is_transition=is_transition,
                     dt=dt,
-                    friction_coefficient=friction_coeff,
+                    friction_coefficient=friction_coeff
+                    if not HETEROGENEOUS_FRICTION_COEFFICIENTS
+                    else friction_coeffs,
                 )
                 model = MainModel(model_params)  # Load from initialization from file
                 model.initialization_model = init_model
