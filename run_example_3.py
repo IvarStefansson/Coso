@@ -565,7 +565,7 @@ if __name__ == "__main__":
                             )
                         ),
                     },
-                    "heterogeneous_permeability": False,
+                    "heterogeneous_permeability": True,
                     "darcy_flux_discretization": "tpfa" if tp else "mpfa",
                     "fourier_flux_discretization": "tpfa" if tp else "mpfa",
                     "use_ic_interpolation": True,
