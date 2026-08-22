@@ -421,6 +421,67 @@ def compute_friction_coefficients_each_fracture(init_model, floor_value=1e-3, ep
     return friction_coeffs
 
 
+def check_initialization_converged(
+    init_model,
+    rtol: float = 1e-3,
+    variable_names: dict[str, str] | None = None,
+) -> dict[str, float]:
+    """Pragmatic stopgap check that the last initialization step was small.
+
+    A more rigorous steady-state check is planned for porepy itself; this is a
+    cheap interim guard so an unequilibrated initialization doesn't silently
+    seed the (expensive) main run and the friction-coefficient back-computation.
+
+    Compares each variable's state at the last converged step (time_step_index=0)
+    against the step before it (time_step_index=1) and computes the max-abs
+    change relative to the variable's own current max-abs magnitude -- avoids
+    needing separately tuned absolute tolerances for pressure (Pa), temperature
+    (K), and displacement (m). Contact traction and interface/well variables are
+    deliberately excluded: they are Lagrange-multiplier-like quantities without a
+    comparable notion of "relative change".
+
+    Parameters:
+        init_model: The initialization model, after its ModelRunner.run() call.
+        rtol: Shared relative-change tolerance for all checked variables.
+        variable_names: Override the default {label: variable_name} mapping
+            (pressure/temperature/displacement).
+
+    Returns:
+        The computed {label: relative_change} mapping, for logging/inspection.
+
+    Raises:
+        RuntimeError: If any checked variable's relative change exceeds rtol.
+    """
+    if variable_names is None:
+        variable_names = {
+            "pressure": init_model.pressure_variable,
+            "temperature": init_model.temperature_variable,
+            "displacement": init_model.displacement_variable,
+        }
+    eq = init_model.equation_system
+    relative_changes = {}
+    failures = []
+    for label, var_name in variable_names.items():
+        current = eq.get_variable_values(variables=[var_name], time_step_index=0)
+        previous = eq.get_variable_values(variables=[var_name], time_step_index=1)
+        diff = float(np.max(np.abs(current - previous)))
+        scale = max(float(np.max(np.abs(current))), 1e-12)
+        rel = diff / scale
+        relative_changes[label] = rel
+        logger.info(f"Initialization last-step relative change in {label}: {rel:.3e}")
+        if rel > rtol:
+            failures.append(label)
+    if failures:
+        raise RuntimeError(
+            "Initialization does not appear converged: relative change over the "
+            f"last time step exceeds rtol={rtol:.1e} for {failures}. "
+            f"Relative changes: {relative_changes}. Consider a longer/slower "
+            "initialization schedule (time_stepper_init in time_steppers_coso) "
+            "or review the artificially high initialization permeability."
+        )
+    return relative_changes
+
+
 HETEROGENEOUS_FRICTION_COEFFICIENTS = True
 boundary_velocities = [
     0.0,
@@ -634,6 +695,7 @@ if __name__ == "__main__":
                     time_stepper=time_stepper_init,
                 ).run()
                 t1_init = time.perf_counter()
+                check_initialization_converged(init_model)
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
                 minimum_friction = 0.4  # Physical lower bound for granodiorite SOURCE
