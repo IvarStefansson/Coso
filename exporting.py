@@ -738,8 +738,17 @@ class CosoExporter:
         u_t: pp.ad.Operator = nd_vec_to_tangential @ self.plastic_displacement_jump(
             fracs
         )
-        # The time increment of the tangential displacement jump
-        u_t_increment: pp.ad.Operator = pp.ad.time_increment(u_t)
+        # The time increment of the tangential displacement jump. NOTE: this is *not*
+        # pp.ad.time_increment(u_t) (= u_t - u_t.previous_timestep()). That helper's
+        # "previous" term reads time_step_index=0, which is correct mid-Newton-solve
+        # (before the step's solution has been shifted into storage) but wrong here:
+        # collect_data() runs from after_time_step_convergence(), *after*
+        # update_time_step_solution() has already shifted the newly-converged step
+        # into time_step_index=0. At that point index 0 no longer holds a "previous"
+        # value -- only index 1 does (see BaseModel.time_step_indices in
+        # run_example_3.py) -- so we read it directly via previous_timestep(steps=2)
+        # (steps=1 -> index 0, steps=2 -> index 1).
+        u_t_increment: pp.ad.Operator = u_t - u_t.previous_timestep(steps=2)
         displacement_jump_increment = self.units.convert_units(
             u_t_increment.value(self.equation_system).reshape(
                 (self.nd - 1, -1), order="F"
