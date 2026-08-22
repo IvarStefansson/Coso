@@ -536,16 +536,14 @@ class ConstraintsCapcrockAndReservoirDepth:
         reservoir_depth = self.reservoir_depth()
         # Store length of fractures as was.
         self._num_fractures = len(self._fractures)
+        box = self.domain.bounding_box
+        x_min, x_max = box["xmin"], box["xmax"]
+        y_min, y_max = box["ymin"], box["ymax"]
         for z in [caprock_depth, reservoir_depth]:
-            center = np.array(
-                [self.domain_sizes()[0] / 2, self.domain_sizes()[1] / 2, -z]
-            )
-            # z constant, x and y at domain corners
-            dx, dy = self.domain_sizes()[0] / 2, self.domain_sizes()[1] / 2
             points = np.array(
                 [
-                    [center[0] - dx, center[0] + dx, center[0] + dx, center[0] - dx],
-                    [center[1] - dy, center[1] - dy, center[1] + dy, center[1] + dy],
+                    [x_min, x_max, x_max, x_min],
+                    [y_min, y_min, y_max, y_max],
                     [-z, -z, -z, -z],
                 ]
             )

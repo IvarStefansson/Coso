@@ -114,7 +114,7 @@ class BaseModel(
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
-    # ConstraintsCapcrockAndReservoirDepth,
+    ConstraintsCapcrockAndReservoirDepth,
     FaultPlaneGeometry,
     HagenPoiseuilleWellPermeability,
     pp.constitutive_laws.CubicLawPermeability,
@@ -128,6 +128,19 @@ class BaseModel(
     PhysicalModel,
 ):
     """Model for the Coso geothermal reservoir."""
+
+    @property
+    def time_step_indices(self) -> np.ndarray:
+        # porepy's default is [0] only (most recent converged step). We need index
+        # 1 (the step before that) too:
+        #  - check_initialization_converged() reads it directly to measure how much
+        #    the solution changed on the last initialization step.
+        #  - CosoExporter.collect_data()'s fracture displacement-jump increment
+        #    reads it because by the time collect_data() runs (from
+        #    after_time_step_convergence, called after update_time_step_solution()
+        #    has already shifted the new step into index 0), index 0 no longer
+        #    holds a "previous" value to diff against -- only index 1 does.
+        return np.array([0, 1])
 
     def create_plot_title(self) -> str:
         """Generate a formatted plot title from folder name and simulation parameters.
@@ -517,8 +530,8 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 8.0e3
                 fracture_size = 6e2
-                refinement = 1.2 if USE_ITERATIVE_SOLVER else 3.0
-                cell_size = 10e2 * refinement
+                refinement = 1.5 if USE_ITERATIVE_SOLVER else 3.0
+                cell_size = 8e2 * refinement
                 cell_size_fracture = 0.4 * fracture_size * refinement
 
                 schedule, neumann_intervals, is_transition = create_schedule(
@@ -573,6 +586,10 @@ if __name__ == "__main__":
                     "fault_plane_dirs": ["point_cloud_clusters"],
                     "fault_extension_config": "fault_extensions.json",
                     "exclude_faults": [
+                        # "0001", Shrunk in config to avoid interference with caprock
+                        # and reservoir boundaries. Can be restored once we go to fine
+                        # meshes. Now the distance from the fracture to the boundary is
+                        # the limiting factor, causing too fine meshes.
                         "0002",
                         # "0003",  #  Intersects injection, extended in config
                         "0004",
