@@ -10,7 +10,7 @@ from porepy.applications.md_grids.model_geometries import TwoEllipticFractures3d
 from exporting import CosoExporter
 from fault_planes import apply_extensions, load_fault_planes
 from save_fracture_coords import easting_northing_offset_to_strike_angle_dip_angle
-from wells import WellDataConceptual, WellDataCoso
+from wells import WellDataConceptual
 
 
 class Layers:
@@ -829,7 +829,7 @@ class FaultPlaneGeometry(CosoGeometry):
             )
 
         pts_all = np.hstack(all_pts)  # (3, total_corners)
-        pad_xy, pad_z = 1.0e3, 1.0e2
+        pad_xy, pad_z = 2.0e3, 1.5e3
         top_boundary_z = self.params.get("top_boundary_z", 0.0)
         box = {
             "xmin": pts_all[0].min() - pad_xy,
