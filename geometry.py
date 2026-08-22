@@ -561,6 +561,33 @@ class ConstraintsCapcrockAndReservoirDepth:
         kwargs["constraints"] = list(constraints)
         return kwargs
 
+    def create_well_mesh(self) -> None:
+        """Exclude the caprock/reservoir constraint planes from well-fracture
+        intersection detection.
+
+        They are meshing constraints, not real fractures (see meshing_kwargs above),
+        and correctly get no subdomain of their own in the mesh. But
+        WellNetwork3d.mesh() -> compute_well_fracture_intersections() has no notion
+        of "meshing constraint" and runs against the full fracture list
+        (self.fracture_network.fractures) regardless. Since these two planes span
+        the entire domain footprint at a fixed depth, any well crossing that depth
+        (essentially unavoidable for a throughgoing constraint) produces a bogus
+        well-fracture intersection whose fracture_index points past the end of the
+        actual (constraint-free) list of 2d subdomains, raising an IndexError in
+        well_network.py's _add_well_fracture_interfaces. Temporarily swap in a
+        fracture network containing only the real fractures for this call.
+        """
+        if not hasattr(self, "_num_fractures"):
+            super().create_well_mesh()
+            return
+        real_fractures = self._fractures[: self._num_fractures]
+        original_network = self.fracture_network
+        self.fracture_network = pp.create_fracture_network(real_fractures, self.domain)
+        try:
+            super().create_well_mesh()
+        finally:
+            self.fracture_network = original_network
+
 
 class SubmergedDomain:
     def depth(self, coords: np.ndarray) -> np.ndarray:
