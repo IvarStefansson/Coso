@@ -395,7 +395,10 @@ def apply_extensions(
         names:       Fault stem names corresponding to each fracture (same order).
         config_path: Path to a JSON file mapping stem names to extension specs.
                      Fractures whose names do not appear in the config are
-                     returned unchanged.
+                     returned unchanged. A fault's value may be a single spec
+                     dict, or a list of spec dicts applied in sequence (e.g. one
+                     "directional" spec per edge, to shrink/extend two opposite
+                     edges of the same fracture independently).
 
     Returns:
         A new list of fractures with extensions applied where configured.
@@ -406,7 +409,10 @@ def apply_extensions(
     result = []
     for frac, name in zip(fractures, names):
         if name in config:
-            result.append(apply_extension(frac, config[name]))
-        else:
-            result.append(frac)
+            specs = config[name]
+            if isinstance(specs, dict):
+                specs = [specs]
+            for spec in specs:
+                frac = apply_extension(frac, spec)
+        result.append(frac)
     return result
