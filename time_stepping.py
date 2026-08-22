@@ -132,7 +132,9 @@ def time_steppers_coso(
     # 5e10 s ~ 1580 years, which is safely below the production period for all cases.
     dt_init = 5e9
     time_stepper_init = build_time_stepper(
-        schedule=[0, 3 * dt_init],
+        # Small interval at the end for checking steady-state convergence after
+        # initialization, cf, check_initialization_converged().
+        schedule=[0, 3 * dt_init, 3.1 * dt_init],
         dt_init=dt_init,
         dt_min=1,
         dt_max=2 * dt_init,
