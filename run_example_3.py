@@ -530,8 +530,8 @@ if __name__ == "__main__":
                 production_period = period * pp.YEAR
                 domain_size = 8.0e3
                 fracture_size = 6e2
-                refinement = 1.5 if USE_ITERATIVE_SOLVER else 3.0
-                cell_size = 8e2 * refinement
+                refinement = 1.0 if USE_ITERATIVE_SOLVER else 3.0
+                cell_size = 10e2 * refinement
                 cell_size_fracture = 0.4 * fracture_size * refinement
 
                 schedule, neumann_intervals, is_transition = create_schedule(
@@ -586,6 +586,7 @@ if __name__ == "__main__":
                     "fault_plane_dirs": ["point_cloud_clusters"],
                     "fault_extension_config": "fault_extensions.json",
                     "exclude_faults": [
+                        # "0000", # Nearly vertical, intersects fracture 5
                         # "0001", Shrunk in config to avoid interference with caprock
                         # and reservoir boundaries. Can be restored once we go to fine
                         # meshes. Now the distance from the fracture to the boundary is
@@ -593,6 +594,8 @@ if __name__ == "__main__":
                         "0002",
                         # "0003",  #  Intersects injection, extended in config
                         "0004",
+                        # "0005",  # Intersects both production wells, extended in
+                        # config to ensure intersection.
                         "0006",  #
                         "0007",
                         "0008",
