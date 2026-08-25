@@ -61,6 +61,8 @@ from solution_strategy import SolutionStrategy
 from nl_params import set_nonlinear_solver
 from wells import _WellDataBase
 
+REPO_ROOT = Path(__file__).resolve().parent
+
 LOG_TO_FILE = False
 log_dir = "example_3_logs"
 FINAL_TIME = 2 * pp.YEAR
@@ -68,6 +70,9 @@ SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
 NUM_BINS_PER_INTERVAL = 3
 USE_ITERATIVE_SOLVER = True
+USE_CONSTRAINTS = (
+    False  # If False, omit ConstraintsCapcrockAndReservoirDepth from the model stack
+)
 if USE_ITERATIVE_SOLVER:
     if "pp_solvers" not in sys.modules:
         raise ImportError(
@@ -110,11 +115,10 @@ else:
     logger.setLevel(logging.DEBUG)
 
 
-class BaseModel(
+class _BaseModel(
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
-    ConstraintsCapcrockAndReservoirDepth,
     FaultPlaneGeometry,
     HagenPoiseuilleWellPermeability,
     pp.constitutive_laws.CubicLawPermeability,
@@ -157,6 +161,16 @@ class BaseModel(
         """
         fn = self.params["plot_title"]
         return fn
+
+
+if USE_CONSTRAINTS:
+
+    class BaseModel(ConstraintsCapcrockAndReservoirDepth, _BaseModel):
+        """Main model for the Coso geothermal reservoir."""
+else:
+
+    class BaseModel(_BaseModel):
+        """Main model for the Coso geothermal reservoir."""
 
 
 class InitializationModel(
@@ -354,10 +368,14 @@ def names_from_params(
     simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}{prod_suffix}"
     # While debugging iterative solvers, distinguish to avoid overwriting the production
     # runs with direct solvers.
+    # Anchored to REPO_ROOT (this file's own directory), not left relative -- a relative
+    # folder_name resolves against whatever the launching shell's cwd happens to be,
+    # which silently scatters output across the filesystem depending on where the
+    # script was invoked from.
     if use_iterative_solver:
-        folder_name = "Case_III_applied/" + simulation_name  # applied
+        folder_name = str(REPO_ROOT / "Case_III_applied" / simulation_name)  # applied
     else:
-        folder_name = "Case_III_direct_solver/" + simulation_name
+        folder_name = str(REPO_ROOT / "Case_III_direct_solver" / simulation_name)
     folder_name_init = folder_name + "_initialization"
     file_name = "example_3"
     prod_label = "with production" if with_production else ", no production"
@@ -496,17 +514,17 @@ def check_initialization_converged(
 
 
 HETEROGENEOUS_FRICTION_COEFFICIENTS = True
-boundary_velocities = [
+BOUNDARY_VELOCITIES = [
     0.0,
     1.0e-6,
     # 2.0e-6,
     # 5.0e-6,
 ]
-with_production = [
+WITH_PRODUCTION = [
     True,
     # False,
 ]
-production_periods = [
+PRODUCTION_PERIODS = [
     # 0.5,
     1.0,
 ]  # In years
@@ -522,17 +540,21 @@ if __name__ == "__main__":
 
     slip_onset_times = {}
     simulation_summaries = []
-    for with_prod in with_production:
-        for velocity in boundary_velocities:
-            for period in production_periods:
+    for with_prod in WITH_PRODUCTION:
+        for velocity in BOUNDARY_VELOCITIES:
+            for period in PRODUCTION_PERIODS:
                 # Define the time parameters
                 dt = 1e3
                 production_period = period * pp.YEAR
                 domain_size = 8.0e3
                 fracture_size = 6e2
                 refinement = 1.0 if USE_ITERATIVE_SOLVER else 3.0
+                if not USE_CONSTRAINTS:
+                    refinement /= 2.2
                 cell_size = 10e2 * refinement
                 cell_size_fracture = 0.4 * fracture_size * refinement
+                cell_size_min = 0.5 * cell_size_fracture
+                # was 3. Ask EK about grid with constraints...
 
                 schedule, neumann_intervals, is_transition = create_schedule(
                     production_period,
@@ -596,8 +618,8 @@ if __name__ == "__main__":
                         "0004",
                         # "0005",  # Intersects both production wells, extended in
                         # config to ensure intersection.
-                        "0006",  #
-                        "0007",
+                        # "0006",  # Intersects 5. Favourable for shut-in?
+                        # "0007", # Same as above.
                         "0008",
                         "0009",
                         "0010",
@@ -620,8 +642,9 @@ if __name__ == "__main__":
                     "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
                     "grid_type": "simplex",
                     "meshing_arguments": {
-                        "cell_size": cell_size,
+                        "cell_size_boundary": cell_size,
                         "cell_size_fracture": cell_size_fracture,
+                        "cell_size_min": cell_size_min,
                     },
                     "file_name": file_name,
                     "data_folder_name": f"{folder_name}_saved_data",
@@ -633,8 +656,10 @@ if __name__ == "__main__":
                     ),
                     "fracture_file": "coords.txt",
                     "folder_name": folder_name_init,
-                    "solver_statistics_file_name": Path(folder_name_init)
-                    / "solver_statistics.json",
+                    # Relative to "folder_name" -- porepy's initialize_data_saving()
+                    # already joins self.params["folder_name"] onto this path, so
+                    # prefixing folder_name_init here again double-nests the output.
+                    "solver_statistics_file_name": "solver_statistics.json",
                     "initialization": True,
                     "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
                     "fracture_params": {  # Other options are available in the geometry mixin.
@@ -718,7 +743,7 @@ if __name__ == "__main__":
                 check_initialization_converged(init_model)
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
-                minimum_friction = 0.4  # Physical lower bound for granodiorite SOURCE
+                minimum_friction = 0.2  # Physical lower bound for granodiorite SOURCE
                 if HETEROGENEOUS_FRICTION_COEFFICIENTS:
                     friction_coeffs = compute_friction_coefficients_each_fracture(
                         init_model, floor_value=minimum_friction, eps=5e-3
@@ -763,8 +788,9 @@ if __name__ == "__main__":
                         },
                         "neumann_intervals": neumann_intervals,
                         "well_transition_duration": transition_duration,
-                        "solver_statistics_file_name": Path(folder_name)
-                        / "solver_statistics.json",
+                        # Relative to "folder_name" -- see the matching comment on the
+                        # init model_params above.
+                        "solver_statistics_file_name": "solver_statistics.json",
                     }
                 )
                 model_class = MainModel
