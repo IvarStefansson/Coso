@@ -10,7 +10,69 @@ import porepy as pp
 logger = logging.getLogger(__name__)
 
 
+def well_fracture_intersections(
+    mdg: pp.MixedDimensionalGrid,
+    fault_names: list[str] | None = None,
+) -> set[tuple[int, int, str | None]]:
+    """Find (well, fracture) pairs connected via a shared 0-D intersection point.
+
+    Well-fracture connections in the mixed-dimensional grid are NOT direct
+    (well, 1D) <-> (fracture, 2D) interfaces; they go through a shared 0-D
+    intersection-point subdomain::
+
+        well (1D, well_num >= 0) --codim1--> point (0D) <--codim2-- fracture (2D)
+
+    so "well W intersects fracture F" means: a 0D point subdomain exists that
+    appears in both a (well, point) interface and a (fracture, point)
+    interface.
+
+    Parameters:
+        mdg: Mixed-dimensional grid, after set_geometry()/meshing (i.e. after
+            wells and their point intersections have been added).
+        fault_names: Optional list of fault/fracture stem names indexed by
+            ``sd.frac_num`` (e.g. from ``model.fracture_names()``), used to
+            attach a human-readable name to each result. If None, the third
+            tuple element is always None.
+
+    Returns:
+        Set of ``(well_num, frac_num, fault_name)`` triples, one per
+        confirmed well-fracture intersection. Note: if a well crosses the
+        same fracture's plane at more than one 0-D point, these collapse
+        into a single triple (multiplicity of intersection points per
+        (well, fracture) pair is not represented).
+    """
+    point_well: dict[pp.Grid, int] = {}
+    point_frac: dict[pp.Grid, int] = {}
+    for intf in mdg.interfaces():
+        sd_primary, sd_secondary = mdg.interface_to_subdomain_pair(intf)
+        for a, b in [(sd_primary, sd_secondary), (sd_secondary, sd_primary)]:
+            if a.dim == 1 and a.well_num >= 0 and b.dim == 0:
+                point_well[b] = a.well_num
+            if a.dim == 2 and b.dim == 0:
+                point_frac[b] = a.frac_num
+
+    results: set[tuple[int, int, str | None]] = set()
+    for point, well_num in point_well.items():
+        frac_num = point_frac.get(point)
+        if frac_num is None:
+            continue
+        fault_name = (
+            fault_names[frac_num]
+            if fault_names is not None and 0 <= frac_num < len(fault_names)
+            else None
+        )
+        results.add((well_num, frac_num, fault_name))
+    return results
+
+
 class _WellDataBase:
+    def well_fracture_intersections(self) -> set[tuple[int, int, str | None]]:
+        """Convenience wrapper around the module-level function of the same
+        name, using this model's ``self.mdg`` and ``self.fracture_names()``.
+        """
+        names = self.fracture_names() if hasattr(self, "fracture_names") else None
+        return well_fracture_intersections(self.mdg, names)
+
     def parent_well(self, sd: pp.Grid) -> pp.Well:
         """Get the parent well of a well subdomain.
 
