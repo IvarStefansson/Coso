@@ -20,31 +20,31 @@
         },
         {
             "type": "directional",
-            "axis": [
-                0.35554499791190625,
-                -0.876308509745568,
-                -0.3250709925652
-            ],
+            "reference": "long",
+            "toward": {
+                "coordinate": "y",
+                "sign": "low"
+            },
             "amount": 150.0
         }
     ],
     "0001": [
         {
             "type": "directional",
-            "axis": [
-                482.640,
-                174.715,
-                1462.550
-            ],
+            "reference": "long",
+            "toward": {
+                "coordinate": "z",
+                "sign": "high"
+            },
             "amount": -100.0
         },
         {
             "type": "directional",
-            "axis": [
-                -482.640,
-                -174.715,
-                -1462.550
-            ],
+            "reference": "long",
+            "toward": {
+                "coordinate": "z",
+                "sign": "low"
+            },
             "amount": -200.0
         }
     ]
