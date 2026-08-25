@@ -213,6 +213,143 @@ def bounding_rectangle(
 
 
 # ---------------------------------------------------------------------------
+# Rectangle geometry helpers (robust to PlaneFracture corner reordering)
+# ---------------------------------------------------------------------------
+
+_COORD_INDEX = {"x": 0, "y": 1, "z": 2}
+
+
+def rectangle_edge_axes(
+    frac: pp.PlaneFracture, rtol: float = 0.02
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the (long_axis, short_axis) unit vectors of a rectangular fracture.
+
+    ``pp.PlaneFracture`` re-sorts its 4 corners by polar angle around the
+    centroid on every construction (see ``PlaneFracture.sort_points``), so
+    corner index 0 is not stable across repeated ``apply_extension`` calls:
+    what was corner 0 before one extension may be corner 2 after the next.
+    This function is robust to that reordering because it computes all 4
+    edges fresh and classifies them by LENGTH -- the two opposite (parallel)
+    edges of a rectangle keep the same length pairing no matter which corner
+    the reordering happens to start from -- rather than assuming a fixed
+    edge like ``pts[:, 1] - pts[:, 0]`` is always "the" long or short edge.
+
+    Parameters:
+        frac: A rectangular fracture with exactly 4 corners (``frac.pts``
+            shape ``(3, 4)``).
+        rtol: Relative tolerance for detecting a near-square rectangle, where
+            "long" vs "short" is not meaningfully defined.
+
+    Returns:
+        long_axis: Unit vector (3,) along the longer pair of parallel edges.
+        short_axis: Unit vector (3,) along the shorter pair of parallel
+            edges. The sign of each is arbitrary (whichever of the two
+            parallel edges is encountered first); use
+            :func:`classify_rectangle_ends` to attach a meaningful sign.
+
+    Raises:
+        ValueError: If ``frac.pts`` does not have exactly 4 columns, or if
+            the two opposite-edge-pair lengths agree to within ``rtol``
+            (near-square rectangle).
+    """
+    corners = frac.pts
+    if corners.shape[1] != 4:
+        raise ValueError(
+            f"rectangle_edge_axes requires a 4-corner fracture, got "
+            f"{corners.shape[1]} corners."
+        )
+    edges = np.column_stack(
+        [corners[:, (i + 1) % 4] - corners[:, i] for i in range(4)]
+    )  # (3, 4)
+    lengths = np.linalg.norm(edges, axis=0)
+    pair_lengths = np.array([(lengths[0] + lengths[2]) / 2, (lengths[1] + lengths[3]) / 2])
+    if abs(pair_lengths[0] - pair_lengths[1]) / pair_lengths.max() < rtol:
+        raise ValueError(
+            "Rectangle is near-square (edge-pair lengths "
+            f"{pair_lengths[0]:.2f} and {pair_lengths[1]:.2f} agree within "
+            f"rtol={rtol}); 'long' vs 'short' axis is not well defined."
+        )
+    long_pair, short_pair = (0, 1) if pair_lengths[0] > pair_lengths[1] else (1, 0)
+    long_axis = edges[:, long_pair] / np.linalg.norm(edges[:, long_pair])
+    short_axis = edges[:, short_pair] / np.linalg.norm(edges[:, short_pair])
+    return long_axis, short_axis
+
+
+def classify_rectangle_ends(
+    frac: pp.PlaneFracture,
+    axis: np.ndarray,
+    coordinate: str,
+    rtol: float = 1e-6,
+) -> dict[str, np.ndarray]:
+    """Sign-correct `axis` to point toward the low- or high-`coordinate` end.
+
+    Groups the 4 corners into the two "ends" of the rectangle along `axis`
+    by the SIGN of ``(corner - centroid) . axis`` -- index-independent, for
+    the same reason as :func:`rectangle_edge_axes` -- then compares the mean
+    world `coordinate` value of each group of 2 corners to decide which end
+    is "low" and which is "high".
+
+    Parameters:
+        frac: A rectangular fracture with exactly 4 corners.
+        axis: In-plane direction (3,), typically ``long_axis`` or
+            ``short_axis`` from :func:`rectangle_edge_axes`. Need not be unit
+            length.
+        coordinate: World coordinate to compare: ``"x"``, ``"y"``, or ``"z"``.
+        rtol: Relative tolerance (of the coordinate range spanned by the
+            fracture's corners) for detecting a tie between the two ends.
+
+    Returns:
+        Dict with ``"low"``: unit vector (3,), a sign-corrected copy of
+        ``axis`` pointing from the centroid toward the corner pair with the
+        LOWER mean value of `coordinate`; and ``"high"``: the opposite sign,
+        pointing toward the higher-mean-coordinate end. Passing
+        ``result["low"]`` (or ``["high"]``) as the ``axis`` argument to
+        :func:`_directional_extension` extends that end, since that function
+        shifts the 2 corners with the largest dot product against its
+        ``axis`` argument further in that same direction.
+
+    Raises:
+        ValueError: If `coordinate` is not one of "x"/"y"/"z"; if `frac.pts`
+            does not have exactly 4 columns; if the corners do not split
+            2-and-2 by the sign of their projection onto `axis` (axis not
+            aligned with an edge direction); or if the two ends tie on
+            `coordinate` within `rtol`.
+    """
+    if coordinate not in _COORD_INDEX:
+        raise ValueError(f"coordinate must be one of 'x'/'y'/'z', got {coordinate!r}.")
+    corners = frac.pts
+    if corners.shape[1] != 4:
+        raise ValueError(
+            f"classify_rectangle_ends requires a 4-corner fracture, got "
+            f"{corners.shape[1]} corners."
+        )
+    ax = np.asarray(axis, dtype=float)
+    ax = ax / np.linalg.norm(ax)
+    centroid = frac.center.ravel()
+    dots = ax @ (corners - centroid[:, np.newaxis])  # (4,)
+    positive = dots > 0
+    if positive.sum() != 2:
+        raise ValueError(
+            "Corners do not split 2-and-2 along the given axis "
+            f"(dots={dots}); axis is not aligned with a rectangle edge."
+        )
+    coord_idx = _COORD_INDEX[coordinate]
+    coord_vals = corners[coord_idx]
+    mean_positive = coord_vals[positive].mean()
+    mean_negative = coord_vals[~positive].mean()
+    coord_range = coord_vals.max() - coord_vals.min()
+    if abs(mean_positive - mean_negative) <= rtol * max(coord_range, 1e-12):
+        raise ValueError(
+            f"The two ends of the rectangle tie on coordinate {coordinate!r} "
+            f"(mean values {mean_negative:.3f} vs {mean_positive:.3f}); "
+            "low/high is not well defined for this axis."
+        )
+    if mean_positive < mean_negative:
+        return {"low": ax.copy(), "high": -ax}
+    return {"low": -ax, "high": ax.copy()}
+
+
+# ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
 
@@ -347,6 +484,72 @@ def _directional_extension(
     return new_frac
 
 
+def resolve_directional_axis(frac: pp.PlaneFracture, spec: dict) -> np.ndarray:
+    """Resolve a ``"directional"`` extension spec's axis to a concrete vector.
+
+    Two mutually exclusive ways to specify the axis:
+
+    Raw form (the original, still fully supported)::
+
+        {"axis": [x, y, z], "amount": ...}
+
+    Symbolic form (avoids ever having to hand-derive and hardcode a unit
+    vector -- see :func:`rectangle_edge_axes`/:func:`classify_rectangle_ends`)::
+
+        {"reference": "long" | "short",
+         "toward": {"coordinate": "x" | "y" | "z", "sign": "low" | "high"},
+         "amount": ...}
+
+    The symbolic form is resolved against `frac`'s CURRENT corners, so when a
+    fracture has multiple chained specs (a list under one fault name in
+    ``fault_extensions.json``), a symbolic spec later in the list resolves
+    against the already-extended shape from earlier specs -- not the
+    original, unextended geometry.
+
+    Parameters:
+        frac: The fracture the spec is about to be applied to.
+        spec: A ``"directional"`` spec dict, containing either ``"axis"``, or
+            both ``"reference"`` and ``"toward"``.
+
+    Returns:
+        Direction vector (3,), suitable as the ``axis`` argument to
+        :func:`_directional_extension` (need not be pre-normalized).
+
+    Raises:
+        ValueError: If `spec` has neither or both forms, or an unrecognized
+            ``"reference"`` value. Errors from :func:`rectangle_edge_axes` /
+            :func:`classify_rectangle_ends` propagate unchanged.
+    """
+    has_raw = "axis" in spec
+    has_symbolic = "reference" in spec or "toward" in spec
+    if has_raw and has_symbolic:
+        raise ValueError(
+            "A 'directional' spec must use either 'axis' or "
+            "'reference'+'toward', not both."
+        )
+    if has_raw:
+        return np.asarray(spec["axis"], dtype=float)
+    if not has_symbolic:
+        raise ValueError(
+            "A 'directional' spec needs either 'axis', or both 'reference' "
+            "and 'toward'."
+        )
+    reference = spec["reference"]
+    toward = spec["toward"]
+    long_axis, short_axis = rectangle_edge_axes(frac)
+    if reference == "long":
+        base_axis = long_axis
+    elif reference == "short":
+        base_axis = short_axis
+    else:
+        raise ValueError(f"'reference' must be 'long' or 'short', got {reference!r}.")
+    ends = classify_rectangle_ends(frac, base_axis, toward["coordinate"])
+    sign = toward["sign"]
+    if sign not in ("low", "high"):
+        raise ValueError(f"'toward.sign' must be 'low' or 'high', got {sign!r}.")
+    return ends[sign]
+
+
 def apply_extension(frac: pp.PlaneFracture, spec: dict) -> pp.PlaneFracture:
     """Apply a single extension specification to a fracture.
 
@@ -359,9 +562,12 @@ def apply_extension(frac: pp.PlaneFracture, spec: dict) -> pp.PlaneFracture:
                 Requires ``"scale"`` (float, e.g. 1.5 doubles the size).
 
             ``"directional"``
-                Shift the two leading corners along a given axis.
-                Requires ``"axis"`` (list of 3 floats) and
-                ``"amount"`` (float, metres).
+                Shift the two leading corners (one whole end-cap edge of the
+                rectangle) along a given axis. The axis may be given either
+                as a raw ``"axis"`` (list of 3 floats), or symbolically via
+                ``"reference"``/``"toward"`` -- see
+                :func:`resolve_directional_axis`. Requires ``"amount"``
+                (float, metres).
 
             ``"to_intersect"``
                 **Not yet implemented** – extend an edge until it meets a
@@ -374,7 +580,8 @@ def apply_extension(frac: pp.PlaneFracture, spec: dict) -> pp.PlaneFracture:
     if kind == "uniform":
         return _uniform_extension(frac, float(spec["scale"]))
     elif kind == "directional":
-        return _directional_extension(frac, spec["axis"], float(spec["amount"]))
+        axis = resolve_directional_axis(frac, spec)
+        return _directional_extension(frac, axis, float(spec["amount"]))
     elif kind == "to_intersect":
         raise NotImplementedError(
             "Extension type 'to_intersect' is not yet implemented."
