@@ -5,14 +5,9 @@ import pandas as pd
 import porepy as pp
 from matplotlib import pyplot as plt
 
-import run_example_2
-import run_example_4
-
+from exporting import JUMP_RANGE
 
 CASES_TO_PLOT = [2]
-
-# N·m; clip moment values below this to remove numerical noise in moment rate
-SEISMIC_MOMENT_NOISE_TOL = 1e-2
 
 
 def get_intervals(
@@ -41,7 +36,11 @@ def get_intervals(
     return intervals
 
 
-def _monotone(times: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _monotone(
+    times: np.ndarray,
+    values: np.ndarray,
+    aux_values: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Filter to strictly monotone-increasing times and non-NaN values.
 
     Also removes the t=0 initial condition, which is set by initialisation and does
@@ -53,21 +52,36 @@ def _monotone(times: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, np.nda
     value and discard the converged one. Instead we use a sliding-window approach:
     when time goes backwards, pop the last accepted point and replace it with the
     current one, so only the most recent (converged) value at each time is retained.
+
+    If ``aux_values`` is given, it is filtered/collapsed in lockstep with ``values``
+    (the accept/reject decisions depend only on ``times``, so this keeps a second,
+    independently-meaningful column correctly aligned) and returned as a third array.
     """
     valid = ~np.isnan(values) & (times > 0)
+    if aux_values is not None:
+        valid &= ~np.isnan(aux_values)
     times, values = times[valid], values[valid]
+    aux_values = aux_values[valid] if aux_values is not None else None
     if len(times) == 0:
-        return times, values
+        return (times, values) if aux_values is None else (times, values, aux_values)
     accepted_times = [times[0]]
     accepted_values = [values[0]]
-    for t, v in zip(times[1:], values[1:]):
+    accepted_aux = [aux_values[0]] if aux_values is not None else None
+    for i in range(1, len(times)):
+        t, v = times[i], values[i]
         if t < accepted_times[-1]:
             # Time went backwards — the previous point was from a failed step; discard.
             accepted_times.pop()
             accepted_values.pop()
+            if accepted_aux is not None:
+                accepted_aux.pop()
         accepted_times.append(t)
         accepted_values.append(v)
-    return np.array(accepted_times), np.array(accepted_values)
+        if accepted_aux is not None:
+            accepted_aux.append(aux_values[i])
+    if aux_values is None:
+        return np.array(accepted_times), np.array(accepted_values)
+    return np.array(accepted_times), np.array(accepted_values), np.array(accepted_aux)
 
 
 def bin_moment_rate(
@@ -82,9 +96,19 @@ def bin_moment_rate(
     Returns ``(bin_edges, rates)`` where ``rates`` has length ``n_bins``.
     """
     df = frac_df[frac_df["fracture_id"] == fracture_id]
-    times, raw_moment = _monotone(df["time"].values, df["seismic_moment"].values)
-    # Remove numerical noise in moment values.
-    moment = np.clip(raw_moment, a_min=SEISMIC_MOMENT_NOISE_TOL, a_max=None)
+    times, raw_moment, jump_increment = _monotone(
+        df["time"].values,
+        df["seismic_moment"].values,
+        df["displacement_jump_increment"].values,
+    )
+    # collect_data()'s seismic_moment = shear_modulus * displacement_jump * fracture_area:
+    # even when there is no real slip, floating-point/contact-solver roundoff in the
+    # displacement jump (~1e-16 m) gets amplified by that (large) modulus*area factor
+    # into a spurious but not-tiny-looking moment (can be O(1-10) N*m). Below the same
+    # threshold used elsewhere to call a step "no slip" (JUMP_RANGE[0], see
+    # exporting.py/plot_example_3.compute_slip_onset_times), treat the moment as exactly
+    # zero rather than summing this noise into a fake, checkpoint-density-dependent rate.
+    moment = np.where(jump_increment > JUMP_RANGE[0], raw_moment, 0.0)
     bin_edges = np.linspace(t_start, t_end, n_bins + 1)
     rates = np.full(n_bins, np.nan)
     for k in range(n_bins):
@@ -128,7 +152,7 @@ def bin_fluid_flux(
     return bin_edges, avg_flux
 
 
-def plot_seismic_moment_and_flux(
+def bin_fracture_column(
     frac_df: pd.DataFrame,
     fracture_id: str,
     column: str,
@@ -280,7 +304,11 @@ def plot_seismic_moment_and_flux(
     """
     csv_dir = Path(csv_dir)
     try:
-        frac_df = pd.read_csv(csv_dir / f"{file_base}_fractures.csv")
+        # Explicit dtype avoids pandas silently dropping leading zeros from
+        # numeric-looking fracture IDs (e.g. FaultPlaneGeometry's "0000").
+        frac_df = pd.read_csv(
+            csv_dir / f"{file_base}_fractures.csv", dtype={"fracture_id": str}
+        )
     except (pd.errors.EmptyDataError, FileNotFoundError):
         print(f"Skipping {csv_dir}: fracture CSV not ready yet.")
         return
@@ -469,6 +497,12 @@ def plot_seismic_moment_and_flux(
 
 
 if __name__ == "__main__":
+    # Only needed for this __main__ driver (examples 2/4), not for the reusable
+    # plotting/binning functions above -- kept out of the module-level imports so
+    # those functions stay importable without example 2/4's dependency chain.
+    import run_example_2
+    import run_example_4
+
     if 4 in CASES_TO_PLOT:
         # --- Example 4 (Case_I) ---
         for velocity in run_example_4.boundary_velocities:

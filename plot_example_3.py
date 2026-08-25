@@ -20,9 +20,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import porepy as pp
 from matplotlib import pyplot as plt
 
 from exporting import JUMP_RANGE, plot_fracture_displacement
+from run_example_3 import BOUNDARY_VELOCITIES, WITH_PRODUCTION, PRODUCTION_PERIODS
 
 
 def _monotonic_time_mask(time: pd.Series) -> np.ndarray:
@@ -70,7 +72,9 @@ def plot_all_fracture_displacements(
     Thin wrapper around ``exporting.plot_fracture_displacement``, which is already
     fracture-count-agnostic (it discovers ``fracture_id`` values from the CSV).
     """
-    return plot_fracture_displacement(csv_dir, file_base, title=title, semilogy=semilogy)
+    return plot_fracture_displacement(
+        csv_dir, file_base, title=title, semilogy=semilogy
+    )
 
 
 def compute_slip_onset_times(
@@ -254,6 +258,43 @@ def plot_flux_and_fracture_displacements(
     print(f"Plot saved to: {output_path}")
 
 
+def plot_seismic_moment_rate(
+    csv_dir: Path | str,
+    file_base: str,
+    period: float,
+    title: str | None = None,
+    num_bins_per_interval: int = 4,
+    symlog: bool = False,
+    out_path: Path | str | None = None,
+) -> None:
+    """Binned seismic moment rate vs the production/shut-in schedule.
+
+    Thin example_3 wrapper around ``plot_seismic_moment_and_flux``'s core
+    plotting function (originally written for examples 2/4, but generic in
+    the fractures it plots -- ``fracture_ids=None`` here means "all fractures
+    found in the CSV", matching this module's fracture-count-agnostic style).
+    """
+    from plot_seismic_moment_and_flux import plot_seismic_moment_and_flux
+    from run_example_3 import FINAL_TIME, PRODUCTION_WELL, SHUT_IN_DURATION
+
+    csv_dir = Path(csv_dir)
+    if out_path is None:
+        out_path = csv_dir / f"{file_base}_seismic_moment_rate.png"
+
+    plot_seismic_moment_and_flux(
+        csv_dir=csv_dir,
+        file_base=file_base,
+        production_period=period * pp.YEAR,
+        shut_in_duration=SHUT_IN_DURATION,
+        final_time=FINAL_TIME,
+        production_well=PRODUCTION_WELL,
+        num_bins_per_interval=num_bins_per_interval,
+        title=title,
+        out_path=out_path,
+        symlog=symlog,
+    )
+
+
 def plot_example_3_results(
     velocity: float,
     period: float,
@@ -273,7 +314,7 @@ def plot_example_3_results(
     )
     csv_dir = Path(f"{folder_name}_saved_data") / "well_monitoring"
 
-    plot_wells(csv_dir, file_name, title=title)
+    # plot_wells(csv_dir, file_name, title=title)
     plot_all_fracture_displacements(csv_dir, file_name, title=title, semilogy=semilogy)
 
     onset_times = compute_slip_onset_times(csv_dir, file_name)
@@ -290,6 +331,16 @@ def plot_example_3_results(
             csv_dir, well_name, file_name, title=title, semilogy=semilogy
         )
 
+    if with_production:
+        # The binned production/shut-in axis this plot is built around only
+        # applies to a production-cycling schedule.
+        plot_seismic_moment_rate(csv_dir, file_name, period, title=title)
+
 
 if __name__ == "__main__":
-    plot_example_3_results(velocity=0.0, period=1.0, with_production=True)
+    for velocity in BOUNDARY_VELOCITIES:
+        for period in PRODUCTION_PERIODS:
+            for has_production in WITH_PRODUCTION:
+                plot_example_3_results(
+                    velocity=velocity, period=period, with_production=has_production
+                )
