@@ -128,7 +128,7 @@ class _BaseModel(
     HydrostaticBoundaryPressureValues,
     ThermalGradientBoundaryTemperatureValues,
     LithostaticBoundaryStressValues,
-    # RadialReturnTangentialContactMechanicsEquation,
+    RadialReturnTangentialContactMechanicsEquation,
     PhysicalModel,
 ):
     """Model for the Coso geothermal reservoir."""
@@ -515,7 +515,7 @@ def check_initialization_converged(
 
 HETEROGENEOUS_FRICTION_COEFFICIENTS = True
 BOUNDARY_VELOCITIES = [
-    0.0,
+    # 0.0,
     1.0e-6,
     # 2.0e-6,
     # 5.0e-6,
@@ -619,7 +619,7 @@ if __name__ == "__main__":
                         # "0005",  # Intersects both production wells, extended in
                         # config to ensure intersection.
                         # "0006",  # Intersects 5. Favourable for shut-in?
-                        # "0007", # Same as above.
+                        "0007",  # Intersects 5. Favourable for shut-in? Tiny, though.
                         "0008",
                         "0009",
                         "0010",
