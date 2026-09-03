@@ -12,3 +12,4 @@ example*.csv
 *.pdf
 gmsh_frac_file.geo_unrolled
 gmsh_frac_file.geo_unrolled.xao
+linear_system_dumps/
