@@ -1,6 +1,18 @@
 import logging
+from pathlib import Path
+
 import porepy as pp
 import pp_solvers
+
+REPO_ROOT = Path(__file__).resolve().parent
+# Snapshot of the linear system (matrix, rhs, indexer bookkeeping) each solver last
+# attempted, overwritten on every solve. Cheap safety net for crashes that kill the
+# whole process before any Python-level except can run (e.g. the native heap-
+# corruption abort inside HYPRE's BoomerAMGCreateS -- see debugging session on
+# run_example_3.py, ~time step 38): whatever landed here right before such a crash
+# is the exact input that triggered it. See
+# IterativeLinearSolver._dump_linear_system_for_debugging in pp_solvers.
+LINEAR_SYSTEM_DUMP_DIR = REPO_ROOT / "linear_system_dumps"
 
 try:
     # These are only needed for the iterative-solver preconditioner factory
@@ -116,11 +128,13 @@ def set_nonlinear_solver(iterative_linear_solver=False):
 
     if iterative_linear_solver:
         linear_solver_mechanics = pp_solvers.IterativeLinearSolver(
-            configuration_factory=pp_solvers.momentum_balance_factory
+            configuration_factory=pp_solvers.momentum_balance_factory,
+            debug_dump_dir=LINEAR_SYSTEM_DUMP_DIR / "mechanics",
         )
         linear_solver_pT = pp_solvers.IterativeLinearSolver(
             delete_matrices=False,
             configuration_factory=th_linear_solver_factory,
+            debug_dump_dir=LINEAR_SYSTEM_DUMP_DIR / "pT",
             solver_options={
                 # "gmres": {
                 #     "ksp_monitor": None,
