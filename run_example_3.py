@@ -1,5 +1,6 @@
 import json
 import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Sequence
 
@@ -73,6 +74,29 @@ USE_ITERATIVE_SOLVER = True
 USE_CONSTRAINTS = (
     False  # If False, omit ConstraintsCapcrockAndReservoirDepth from the model stack
 )
+RESTART_FROM_CRASH = True
+# Debugging aid: resume both the initialization and main models from their own
+# previously saved output (vtu/pvd/times.json) under `folder_name_init`/`folder_name`,
+# instead of re-simulating from t=0. Built to fast-forward to the HYPRE
+# BoomerAMGCreateS heap-corruption crash (time step 38, Newton iter 20 of the
+# "velocity_1e-06_period_1e+00" case) in minutes instead of hours -- see
+# `linear_system_dumps/` (pp_solvers.IterativeLinearSolver debug_dump_dir, wired in
+# nl_params.py) for capturing the triggering matrix once reproduced. The
+# initialization model is loaded straight to its converged end state (no re-run of
+# its own short equilibration loop); the main model resumes time-stepping from
+# whatever schedule checkpoint its restart source last completed, writing new output
+# to a separate "_restart_debug" folder so the original crash evidence is untouched.
+RESTART_DRY_RUN = False
+# If RESTART_FROM_CRASH: stop right after loading state for both models (before any
+# Newton solve) and print the restored time -- verifies the restart actually landed
+# on the expected checkpoint before committing to a real (multi-minute) run.
+RESTART_STEPS_BACK = 1
+# How many saved states to rewind past the last one, for the main model. 0 resumes at
+# the last saved state, i.e. straight into the step that crashed -- which reproduces
+# the crash fastest but proves nothing about whether the restored state is sound (a
+# corrupted state can fail too). 1 (default) resumes one step earlier, so the run must
+# first re-simulate a step whose outcome is already known from the source run's
+# times.json (compare the reported t/dt against it) before reaching the crashing step.
 if USE_ITERATIVE_SOLVER:
     if "pp_solvers" not in sys.modules:
         raise ImportError(
@@ -361,6 +385,175 @@ def create_schedule(
     return schedule, neumann_intervals, is_transition
 
 
+def _latest_numbered_pvd(
+    folder: Path,
+    file_name: str,
+    steps_back: int = 0,
+    before_mtime: float | None = None,
+) -> Path:
+    """The numbered pvd file holding the final state of the run that wrote
+    ``folder``'s current times.json, optionally rewound ``steps_back`` steps.
+
+    Output folders are never cleared between runs, so they accumulate debris from
+    several runs at once -- and it bites in *both* directions, so neither "highest
+    index" nor "newest mtime" is safe:
+
+    - A shorter run leaves behind higher-numbered files from a previous, longer
+      one, possibly on a different mesh. The crashed main run reached ``_000038``
+      while ``_000176`` was still lying around; restoring from that one trips a
+      shape-mismatch assertion inside `Exporter.import_state_from_vtu`.
+    - A *later* run can overwrite a *lower*-numbered file. In the initialization
+      folder, ``_000003`` was rewritten hours after ``_000004``, by a run whose
+      state carried a 1e9 pressure error -- restoring from it silently poisons the
+      initialization state (and everything derived from it) rather than failing.
+
+    So anchor on times.json instead: its final write and the final state's pvd
+    write happen within the same `save_data_time_step` call, seconds apart, which
+    picks out the right file regardless of index or of what else is in the folder.
+    """
+    numbered_pvds = list(folder.glob(f"{file_name}_" + "[0-9]" * 6 + ".pvd"))
+    if not numbered_pvds:
+        raise FileNotFoundError(
+            f"No numbered pvd files matching '{file_name}_NNNNNN.pvd' found in "
+            f"{folder} -- nothing to restart from."
+        )
+    if before_mtime is not None:
+        # Restrict to files written before a given moment -- used to pin the
+        # initialization state to the run that actually seeded the main run being
+        # restarted, ignoring anything a *later* run wrote into the same folder.
+        numbered_pvds = [
+            pvd for pvd in numbered_pvds if pvd.stat().st_mtime < before_mtime
+        ]
+        if not numbered_pvds:
+            raise FileNotFoundError(
+                f"No numbered pvd files in {folder} predate the requested cutoff "
+                "-- nothing to restart from."
+            )
+        # The last state written before the cutoff, i.e. that run's final state.
+        anchor = max(numbered_pvds, key=lambda pvd: pvd.stat().st_mtime)
+    else:
+        times_mtime = (folder / "times.json").stat().st_mtime
+        anchor = min(
+            numbered_pvds, key=lambda pvd: abs(pvd.stat().st_mtime - times_mtime)
+        )
+    if steps_back == 0:
+        return anchor
+    # Step back by index from the anchor, so intermediate files rewritten by other
+    # runs cannot be selected on mtime.
+    wanted = anchor.with_name(
+        f"{file_name}_{int(anchor.stem[-6:]) - steps_back:06d}.pvd"
+    )
+    if not wanted.exists():
+        raise FileNotFoundError(
+            f"{wanted} does not exist -- cannot rewind {steps_back} step(s) back "
+            f"from {anchor.name}."
+        )
+    return wanted
+
+
+def latest_restart_options(
+    folder_name: str, file_name: str, steps_back: int = 0
+) -> dict:
+    """Build ``restart_options`` for resuming *time-stepping* from the latest saved
+    checkpoint in ``folder_name`` (used for the main model).
+
+    Uses porepy's ``pvd_file`` + ``is_mdg_pvd=True`` restart path: besides being the
+    read source, ``pvd_file`` also feeds ``write_pvd_and_vtu``'s write-continuation
+    (``Exporter.write_pvd(..., append=True, from_pvd_file=pvd_file)``, called on
+    every subsequent successful step), which requires a valid ``pvd_file`` entry
+    regardless of how state was loaded -- so this is the only restart_options shape
+    safe to use for a model that will keep exporting afterward. Confirmed correct
+    (by cross-referencing against the crashed run's own log) for this main-run
+    folder structure: the numbered pvd counter and times.json length agree there.
+
+    Parameters:
+        folder_name: A previous run's output folder (contains the numbered pvd/vtu
+            files and times.json).
+        file_name: The base file name used for exporting (e.g. "example_3").
+
+    Returns:
+        A dict suitable for ``model_params["restart_options"]``.
+
+    """
+    latest_pvd = _latest_numbered_pvd(Path(folder_name), file_name, steps_back)
+    times_file = latest_pvd.parent / "times.json"
+    with open(times_file) as f:
+        num_exported = len(json.load(f)["time"])
+    pvd_index = int(latest_pvd.stem[-6:])
+    if pvd_index != num_exported - 1 - steps_back:
+        raise ValueError(
+            f"{latest_pvd.name}'s own counter ({pvd_index}) is not the target "
+            f"times.json index ({num_exported - 1 - steps_back}) in {folder_name}. "
+            "porepy's "
+            "pvd-based restart derives the time index from the filename, so it "
+            "would read the wrong entry (or run off the end of the history). Use "
+            "latest_restart_options_state_only() instead if this model does not "
+            "need to keep exporting."
+        )
+    return {
+        "restart": True,
+        "pvd_file": latest_pvd,
+        "is_mdg_pvd": True,
+        "times_file": times_file,
+    }
+
+
+def latest_restart_options_state_only(
+    folder_name: str,
+    file_name: str,
+    steps_back: int = 0,
+    before_mtime: float | None = None,
+) -> dict:
+    """Build ``restart_options`` for loading *state only* (no further time-stepping
+    or exporting expected) from the latest saved checkpoint in ``folder_name`` (used
+    for the initialization model, which we load straight to its converged end state
+    and never run or export from again).
+
+    Unlike :func:`latest_restart_options`, does NOT trust the numbered ("mdg") pvd
+    file's own filename counter as a times.json index: confirmed (by
+    cross-referencing file mtimes) that for an initialization run's folder the
+    numbered-pvd counter runs one ahead of times.json's length -- its scheduler
+    class doesn't log the pre-loop initial-condition export to times.json, unlike
+    the main model's. So instead this resolves the vtu files to load from the
+    latest pvd's own ``<DataSet file=...>`` entries (that part of the data is fine)
+    but passes the correct index explicitly via porepy's ``vtu_files`` +
+    ``time_index`` restart path. ``len(exported times) - 1`` is always right by
+    construction: times.json is only ever appended to, once per actually completed
+    and exported time step.
+
+    Caution: the resulting dict has no ``pvd_file`` key, so the model this is used
+    on must not call ``save_data_time_step``/``write_pvd_and_vtu`` afterward (it
+    unconditionally reads ``restart_options["pvd_file"]`` for write-continuation,
+    regardless of how state was loaded) -- including the one auto-export inside
+    ``prepare_simulation()`` itself; the caller must no-op that out first (see
+    RESTART_FROM_CRASH handling around ``init_model.prepare_simulation()``).
+
+    Parameters:
+        folder_name: A previous run's output folder (contains the numbered pvd/vtu
+            files and times.json).
+        file_name: The base file name used for exporting (e.g. "example_3").
+
+    Returns:
+        A dict suitable for ``model_params["restart_options"]``.
+
+    """
+    folder = Path(folder_name)
+    latest_pvd = _latest_numbered_pvd(folder, file_name, steps_back, before_mtime)
+    vtu_files = [
+        latest_pvd.parent / dataset.attrib["file"]
+        for dataset in ET.parse(latest_pvd).getroot().iter("DataSet")
+    ]
+    times_file = folder / "times.json"
+    with open(times_file) as f:
+        num_exported = len(json.load(f)["time"])
+    return {
+        "restart": True,
+        "vtu_files": vtu_files,
+        "time_index": num_exported - 1 - steps_back,
+        "times_file": times_file,
+    }
+
+
 def names_from_params(
     velocity: float, period: float, with_production: bool, use_iterative_solver: bool
 ):
@@ -564,20 +757,106 @@ if __name__ == "__main__":
                     initial_shutin_duration=INITIAL_SHUTIN_DURATION,
                     with_production=with_prod,
                 )
+                simulation_name, folder_name, folder_name_init, file_name, title = (
+                    names_from_params(velocity, period, with_prod, USE_ITERATIVE_SOLVER)
+                )
+                restart_options_init = None
+                restart_options_main = None
+                restart_dt_first = None
+                if RESTART_FROM_CRASH:
+                    # Resume the main model from the last checkpoint its own previous
+                    # run (in `folder_name`) reached, instead of re-simulating from
+                    # t=0. Slicing `schedule`/`is_transition` here (before
+                    # `time_steppers_coso` builds the per-interval scheduler) is
+                    # required: porepy's scheduler always starts at `schedule[0]`, it
+                    # does not pick up from `model.time_data.time`.
+                    restart_options_main = latest_restart_options(
+                        folder_name, file_name, RESTART_STEPS_BACK
+                    )
+                    with open(Path(folder_name) / "times.json") as f:
+                        source_times = json.load(f)
+                    restart_step = len(source_times["time"]) - 1 - RESTART_STEPS_BACK
+                    restart_time = source_times["time"][restart_step]
+                    # The dt the source run actually used for the step out of this
+                    # state, so the resumed run repeats that same step instead of
+                    # guessing a first dt (the auto-picked one is half the remaining
+                    # schedule interval -- ~1700x too large here, which just burns
+                    # retries). Only available when rewinding: the last saved state's
+                    # own next step is the one that never completed.
+                    restart_dt_first = (
+                        source_times["dt"][restart_step + 1]
+                        if restart_step + 1 < len(source_times["dt"])
+                        else None
+                    )
+                    # `schedule` only holds *mandatory* checkpoints (BC changes) plus
+                    # bin-boundary markers for post-processing -- the adaptive stepper
+                    # takes many more accepted intermediate steps between them, so
+                    # `restart_time` (an arbitrary accepted step) generally will NOT
+                    # be an exact entry of `schedule`. Build a new schedule: the
+                    # restart time itself, followed by whichever original checkpoints
+                    # still lie ahead of it. Treated as a non-transition point, so the
+                    # first resumed interval's dt_start is auto-picked from its
+                    # (now shorter) length -- may not exactly match the dt the
+                    # original run had adaptively grown to by this point; the
+                    # TargetNonlinearIterations retry logic will correct course within
+                    # a step or two if it's a poor first guess.
+                    still_ahead = schedule > restart_time
+                    assert np.any(still_ahead), (
+                        f"Restart time {restart_time} is at or past the last "
+                        f"schedule checkpoint ({schedule[-1]}) -- nothing left to "
+                        "simulate."
+                    )
+                    logger.info(
+                        "RESTART_FROM_CRASH: resuming main model at t=%.6g "
+                        "(saved state %d of %d, %d step(s) back; first dt=%s), "
+                        "source=%s, %d schedule checkpoints remaining",
+                        restart_time,
+                        restart_step,
+                        len(source_times["time"]) - 1,
+                        RESTART_STEPS_BACK,
+                        f"{restart_dt_first:.6g}" if restart_dt_first else "auto",
+                        folder_name,
+                        int(np.sum(still_ahead)),
+                    )
+                    schedule = np.concatenate(([restart_time], schedule[still_ahead]))
+                    is_transition = np.concatenate(
+                        ([False], is_transition[still_ahead])
+                    )
+                    # The initialization model already converged in a previous run;
+                    # load its final state directly instead of re-running the
+                    # equilibration loop.
+                    # The init model is always taken at its final converged state:
+                    # RESTART_STEPS_BACK is about re-simulating a known-good *main*
+                    # time step, and has no meaning for a model we never re-run.
+                    #
+                    # Pinned to before the main run's own output: the init folder
+                    # holds states from several runs, and a *later* one (whose state
+                    # carried a 1e9 pressure error from the unscaled-restart bug
+                    # worked around in solution_strategy.py) had overwritten both the
+                    # lower-numbered files and times.json. Restoring from that
+                    # silently poisons the initialization -- and everything derived
+                    # from it -- instead of failing. The init phase that seeded the
+                    # run we are restarting necessarily precedes that run's output.
+                    restart_options_init = latest_restart_options_state_only(
+                        folder_name_init,
+                        file_name,
+                        before_mtime=restart_options_main["pvd_file"].stat().st_mtime,
+                    )
+                    # Write the restarted run's new output separately so the original
+                    # crash evidence (logs, linear_system_dumps/) is left untouched.
+                    folder_name = folder_name + "_restart_debug"
                 time_stepper, time_stepper_init = time_steppers_coso(
                     schedule,
                     dt,
                     iter_optimal_range=(10, 15),
                     is_transition=is_transition,
                     dt_start_transition=10,
+                    dt_start_first=restart_dt_first if RESTART_FROM_CRASH else None,
                 )
                 solid_values_local = copy.deepcopy(granodiorite_values)
                 solid_values_init = copy.deepcopy(solid_values_local)
                 solid_values_init["permeability"] *= (
                     1e2  # More permeable for faster equilibration during initialization.
-                )
-                simulation_name, folder_name, folder_name_init, file_name, title = (
-                    names_from_params(velocity, period, with_prod, USE_ITERATIVE_SOLVER)
                 )
                 if copy_plots:
                     # Copy the plots from previous runs to the new folder for comparison.
@@ -678,6 +957,8 @@ if __name__ == "__main__":
                     "boundary_displacement_velocity": velocity / pp.YEAR,
                     "surface_temperature": pp.Celsius_to_Kelvin(20.0),
                 }
+                if restart_options_init is not None:
+                    model_params_init["restart_options"] = restart_options_init
                 model_params = copy.deepcopy(model_params_init)
                 if with_prod:
                     injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
@@ -702,6 +983,18 @@ if __name__ == "__main__":
                     dt=dt,
                 )
                 init_model = InitializationModel(model_params_init)
+                if RESTART_FROM_CRASH:
+                    # restart_options_init has no "pvd_file" (see
+                    # latest_restart_options_state_only), but write_pvd_and_vtu()
+                    # unconditionally reads restart_options["pvd_file"] for its
+                    # write-continuation logic whenever restart_options["restart"] is
+                    # True -- regardless of which restart read-path was used. We
+                    # never intend for this model to export again (its saved history
+                    # is already complete and we're not re-running its time loop),
+                    # so no-op the one auto-export prepare_simulation() would
+                    # otherwise trigger, rather than fight porepy's restart_options
+                    # schema for a write we don't want anyway.
+                    init_model.save_data_time_step = lambda: None
 
                 t0_init = time.perf_counter()
                 nonlinear_solver = set_nonlinear_solver(
@@ -732,15 +1025,30 @@ if __name__ == "__main__":
                 ad = init_model.equation_system.evaluate(
                     op, derivative=True, variable_indexer=var_indexer
                 )
-                reset_time_io()
-                pp.ModelRunner(
-                    init_model,
-                    nonlinear_solver=nonlinear_solver,
-                    params={"prepare_simulation": False},
-                    time_stepper=time_stepper_init,
-                ).run()
-                t1_init = time.perf_counter()
-                check_initialization_converged(init_model)
+                if RESTART_FROM_CRASH:
+                    # init_model.prepare_simulation() above already restored the
+                    # converged end state from restart_options_init; no need to
+                    # re-run the (short) equilibration loop. The convergence check
+                    # below needs time_step_index=1, which restart does not
+                    # populate -- skip it, trusting the original run's validation.
+                    t1_init = time.perf_counter()
+                    logger.info(
+                        "RESTART_FROM_CRASH: init model restored to time=%.6g "
+                        "(source=%s); skipped re-running its equilibration loop "
+                        "and its convergence check.",
+                        init_model.time_data.time,
+                        folder_name_init,
+                    )
+                else:
+                    reset_time_io()
+                    pp.ModelRunner(
+                        init_model,
+                        nonlinear_solver=nonlinear_solver,
+                        params={"prepare_simulation": False},
+                        time_stepper=time_stepper_init,
+                    ).run()
+                    t1_init = time.perf_counter()
+                    check_initialization_converged(init_model)
                 # Analyze the initialization results to set friction coefficient
                 sds = init_model.mdg.subdomains(dim=2)
                 minimum_friction = 0.2  # Physical lower bound for granodiorite SOURCE
@@ -793,6 +1101,13 @@ if __name__ == "__main__":
                         "solver_statistics_file_name": "solver_statistics.json",
                     }
                 )
+                # model_params was deepcopy'd from model_params_init, which may carry
+                # the *initialization* model's restart_options (pointing at
+                # folder_name_init) -- the main model needs its own, distinct one.
+                if restart_options_main is not None:
+                    model_params["restart_options"] = restart_options_main
+                else:
+                    model_params.pop("restart_options", None)
                 model_class = MainModel
 
                 save_run_config(
@@ -819,9 +1134,29 @@ if __name__ == "__main__":
                     iterative_linear_solver=USE_ITERATIVE_SOLVER
                 )
                 reset_time_io()
-                pp.ModelRunner(
+                # Construct the runner separately from .run(): ModelRunner.__init__
+                # seeds model.time_data from the scheduler (schedule included) and
+                # only then calls prepare_simulation(), which is where a restart's
+                # reset_state_from_file() runs. Preparing the model by hand before
+                # this would leave it on SolutionStrategy's placeholder [0, 1]
+                # schedule while boundary conditions are built. Splitting the call
+                # in two lets us inspect the restored state before any Newton solve.
+                model_runner = pp.ModelRunner(
                     model, nonlinear_solver=nonlinear_solver, time_stepper=time_stepper
-                ).run()
+                )
+                if RESTART_FROM_CRASH:
+                    logger.info(
+                        "RESTART_FROM_CRASH: main model restored to time=%.6g "
+                        "(source pvd=%s)",
+                        model.time_data.time,
+                        restart_options_main["pvd_file"],
+                    )
+                    if RESTART_DRY_RUN:
+                        logger.info(
+                            "RESTART_DRY_RUN: stopping before any Newton solve."
+                        )
+                        continue
+                model_runner.run()
                 t1_main = time.perf_counter()
                 simulation_summaries.append(
                     {

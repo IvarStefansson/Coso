@@ -56,6 +56,7 @@ def time_steppers_coso(
     max_attempts: int = 10,
     is_transition: np.ndarray | None = None,
     dt_start_transition: float = 2.0,
+    dt_start_first: float | None = None,
 ) -> tuple[TimeStepper, TimeStepper]:
     """Per-interval time stepper for run_example_2/3's production schedule.
 
@@ -87,6 +88,9 @@ def time_steppers_coso(
     own ``dt_max`` (i.e. start at the target ceiling right away) at bin-only edges.
     If ``is_transition`` is ``None``, every interval keeps using the uniform ``dt``
     as before.
+
+    ``dt_start_first`` overrides the first interval's ``dt_start`` only, leaving the
+    rest untouched; see the comment at its use below.
     """
     # Target reduction factor per interval boundary crossing. This sets the
     # maximum time step size for each interval as a fraction of the interval
@@ -101,6 +105,15 @@ def time_steppers_coso(
         dt_starts = np.where(
             is_transition[:-1], dt_start_transition, interval_lengths / ks
         )
+
+    if dt_start_first is not None:
+        # Used when resuming mid-schedule (see RESTART_FROM_CRASH in
+        # run_example_3.py): the first interval then starts at an arbitrary accepted
+        # step rather than a real schedule point, so its auto-picked dt_start (half
+        # the remaining interval) bears no relation to the dt the interrupted run
+        # had adaptively grown to. Passing that original dt reproduces the same step
+        # instead of burning retries shrinking a far-too-large first guess.
+        dt_starts[0] = dt_start_first
 
     intervals = [
         TimeInterval.create(

@@ -35,6 +35,71 @@ def clip_decorator(a: float, b: float):
 
 
 class SolutionStrategy(FluxDiscretization):
+    def reset_state_from_file(self) -> None:
+        """Restart from file, correcting for porepy's missing unit back-conversion.
+
+        Workaround for an upstream bug: the export path scales every variable to SI
+        (`DataSavingMixin.data_to_export` calls
+        ``self.units.convert_units(..., to_si=True)``), but the restart path does
+        not undo it -- `Exporter.import_state_from_vtu` writes the raw SI values
+        straight into the equation system via `pp.set_solution_values`, and
+        `convert_units` appears nowhere on the read side. So porepy's vtu/pvd
+        restart is only correct for a model whose `pp.Units` are all 1.
+
+        This model runs ``pp.Units(m=1.0, kg=1.0e9, K=1.0)``, i.e. its internal
+        pressure unit is 1e9 Pa. A restart therefore loaded pressures ~1e9x too
+        large (SI 1.4e5-3.8e7 Pa into a system expecting 1.4e-4-3.8e-2), which
+        overflowed an exp() in the constitutive laws and produced a NaN residual on
+        the very first assembly -- every time step diverging after one Newton
+        iteration regardless of dt. Temperature and displacement round-trip fine
+        here only because K and m are both 1.
+
+        Fixes it by converting each restored variable back from SI to model-scaled
+        units (the exact inverse of `data_to_export`, using the same ``si_units``
+        variable tag), then redoing the iterate-slot copy and boundary-condition
+        refresh that the base method performs on the now-corrected values.
+        """
+        super().reset_state_from_file()
+        if not self.restart_options.get("restart", False):
+            return
+
+        for var in self.equation_system.variables:
+            si_values = self.equation_system.get_variable_values(
+                variables=[var], time_step_index=0
+            )
+            scaled = self.units.convert_units(si_values, var.tags["si_units"])
+            if var.name in ("pressure", "temperature", "u"):
+                logger.debug(
+                    "  RESCALE %-12s [%-3s] dim=%d ncells=%-6d |si|max=%.6g -> "
+                    "|scaled|max=%.6g",
+                    var.name,
+                    var.tags["si_units"],
+                    getattr(var.domain, "dim", -1),
+                    getattr(var.domain, "num_cells", 0),
+                    abs(si_values).max() if si_values.size else 0.0,
+                    abs(scaled).max() if scaled.size else 0.0,
+                )
+            self.equation_system.set_variable_values(
+                scaled,
+                variables=[var],
+                time_step_index=0,
+            )
+
+        # Mirror the tail of the base implementation, now on rescaled values: seed
+        # iterate 0 from the restored time step and rebuild the time-dependent
+        # boundary arrays (which the base already built from the unscaled values).
+        values = self.equation_system.get_variable_values(time_step_index=0)
+        self.equation_system.set_variable_values(
+            values, iterate_index=0, time_step_index=0
+        )
+        self.update_time_dependent_ad_arrays()
+        logger.info(
+            "%s: rescaled %d restored variables from SI to model units "
+            "(enable DEBUG on this logger for per-variable magnitudes).",
+            type(self).__name__,
+            len(self.equation_system.variables),
+        )
+
     def initial_condition(self) -> None:
         """Set initial conditions for the model.
         This method sets the initial conditions for the model by reading well data and
