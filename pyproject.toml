@@ -3,3 +3,10 @@ name = "Run scripts: Drivers and triggers of shut-in seismicity at the Coso geot
 dependencies = [
     "openpyxl",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
