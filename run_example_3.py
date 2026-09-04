@@ -74,7 +74,7 @@ USE_ITERATIVE_SOLVER = True
 USE_CONSTRAINTS = (
     False  # If False, omit ConstraintsCapcrockAndReservoirDepth from the model stack
 )
-RESTART_FROM_CRASH = True
+RESTART_FROM_CRASH = False
 # Debugging aid: resume both the initialization and main models from their own
 # previously saved output (vtu/pvd/times.json) under `folder_name_init`/`folder_name`,
 # instead of re-simulating from t=0. Built to fast-forward to the HYPRE
@@ -555,10 +555,19 @@ def latest_restart_options_state_only(
 
 
 def names_from_params(
-    velocity: float, period: float, with_production: bool, use_iterative_solver: bool
+    velocity: float,
+    period: float,
+    with_production: bool,
+    use_iterative_solver: bool,
+    faults: list[str] | None = None,
 ):
     prod_suffix = "" if with_production else "_no_production"
     simulation_name = f"velocity_{velocity:.0e}_period_{period:.0e}{prod_suffix}"
+    if faults is not None:
+        # Join and zero-pad the fault numbers to make a compact, sortable string for the
+        # folder name.
+        fault_str = "_".join(f[2:] for f in faults)
+        simulation_name = f"faults_{fault_str}/" + simulation_name
     # While debugging iterative solvers, distinguish to avoid overwriting the production
     # runs with direct solvers.
     # Anchored to REPO_ROOT (this file's own directory), not left relative -- a relative
@@ -569,6 +578,7 @@ def names_from_params(
         folder_name = str(REPO_ROOT / "Case_III_applied" / simulation_name)  # applied
     else:
         folder_name = str(REPO_ROOT / "Case_III_direct_solver" / simulation_name)
+
     folder_name_init = folder_name + "_initialization"
     file_name = "example_3"
     prod_label = "with production" if with_production else ", no production"
@@ -725,6 +735,27 @@ transition_duration = 2 * pp.HOUR
 INITIAL_SHUTIN_DURATION = (
     pp.DAY * 2  # short shut-in at t=0 to populate no-flow pressure cache
 )
+exclude_faults = [
+    # "0000", # Nearly vertical, intersects fracture 5
+    # "0001", Shrunk in config to avoid interference with caprock
+    # and reservoir boundaries. Can be restored once we go to fine
+    # meshes. Now the distance from the fracture to the boundary is
+    # the limiting factor, causing too fine meshes.
+    "0002",
+    # "0003",  #  Intersects injection, extended in config
+    "0004",
+    # "0005",  # Intersects both production wells, extended in
+    # config to ensure intersection.
+    "0006",  # Intersects 5. Favourable for shut-in?
+    # "0007",  # Intersects 5. Favourable for shut-in? Tiny, though.
+    "0008",
+    "0009",
+    "0010",
+    "0011",
+    "0012",
+]
+all_faults = [f"{i:04d}" for i in range(13)]
+kept_faults = [f for f in all_faults if f not in exclude_faults]
 if __name__ == "__main__":
     tp = True
     copy_plots = False
@@ -758,7 +789,9 @@ if __name__ == "__main__":
                     with_production=with_prod,
                 )
                 simulation_name, folder_name, folder_name_init, file_name, title = (
-                    names_from_params(velocity, period, with_prod, USE_ITERATIVE_SOLVER)
+                    names_from_params(
+                        velocity, period, with_prod, USE_ITERATIVE_SOLVER, kept_faults
+                    )
                 )
                 restart_options_init = None
                 restart_options_main = None
@@ -886,25 +919,7 @@ if __name__ == "__main__":
                 model_params_init = {
                     "fault_plane_dirs": ["point_cloud_clusters"],
                     "fault_extension_config": "fault_extensions.json",
-                    "exclude_faults": [
-                        # "0000", # Nearly vertical, intersects fracture 5
-                        # "0001", Shrunk in config to avoid interference with caprock
-                        # and reservoir boundaries. Can be restored once we go to fine
-                        # meshes. Now the distance from the fracture to the boundary is
-                        # the limiting factor, causing too fine meshes.
-                        "0002",
-                        # "0003",  #  Intersects injection, extended in config
-                        "0004",
-                        # "0005",  # Intersects both production wells, extended in
-                        # config to ensure intersection.
-                        # "0006",  # Intersects 5. Favourable for shut-in?
-                        "0007",  # Intersects 5. Favourable for shut-in? Tiny, though.
-                        "0008",
-                        "0009",
-                        "0010",
-                        "0011",
-                        "0012",
-                    ],
+                    "exclude_faults": exclude_faults,
                     "well_sheet_names": {
                         "1 Injection well": "68-20RD",
                         "2 Production well": "16A-20",
