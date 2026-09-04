@@ -71,6 +71,11 @@ SHUT_IN_DURATION = 3 * pp.DAY
 PRODUCTION_WELL = "2 Production well"
 NUM_BINS_PER_INTERVAL = 3
 USE_ITERATIVE_SOLVER = True
+# Nonlinear solver scheme, see nl_params.set_nonlinear_solver. "sequential" splits the
+# solve into a mechanics and a pressure/temperature block; "monolithic" restores the
+# `main`-branch setup, a single Newton over the fully coupled system preconditioned by
+# pp_solvers.thm_factory.
+SOLVER_SCHEME = "sequential"
 USE_CONSTRAINTS = (
     False  # If False, omit ConstraintsCapcrockAndReservoirDepth from the model stack
 )
@@ -103,10 +108,9 @@ if USE_ITERATIVE_SOLVER:
             "pp_solvers module is required for iterative solvers. Please install pp_solvers"
             + " or set use_iterative_solver to False."
         )
-    from solver_configurations import (
-        linear_solver_params,
-        linear_solver_selector_params,
-    )
+    # The PETSc options themselves live in solver_configurations.py and are pulled in by
+    # nl_params.set_nonlinear_solver; importing them here too would only invite the two
+    # copies to drift.
 
 
 if LOG_TO_FILE:
@@ -1013,7 +1017,8 @@ if __name__ == "__main__":
 
                 t0_init = time.perf_counter()
                 nonlinear_solver = set_nonlinear_solver(
-                    iterative_linear_solver=USE_ITERATIVE_SOLVER
+                    iterative_linear_solver=USE_ITERATIVE_SOLVER,
+                    scheme=SOLVER_SCHEME,
                 )
                 init_model.prepare_simulation()
                 grids = [init_model.mdg.subdomains(dim=1)[0]]
@@ -1146,7 +1151,8 @@ if __name__ == "__main__":
                 # )
                 t0_main = time.perf_counter()
                 nonlinear_solver = set_nonlinear_solver(
-                    iterative_linear_solver=USE_ITERATIVE_SOLVER
+                    iterative_linear_solver=USE_ITERATIVE_SOLVER,
+                    scheme=SOLVER_SCHEME,
                 )
                 reset_time_io()
                 # Construct the runner separately from .run(): ModelRunner.__init__

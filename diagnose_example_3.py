@@ -68,6 +68,7 @@ def run_diagnostic(
     velocity: float = 0.0,
     # --- solver ---
     iterative_linear_solver: bool = False,
+    scheme: str = "sequential",
     # --- init phase ---
     run_init: bool = True,
     friction_coefficient: float = 0.6,
@@ -178,7 +179,7 @@ def run_diagnostic(
     if run_init:
         init_model = DiagInitializationModel(model_params_init)
         nonlinear_solver = set_nonlinear_solver(
-            iterative_linear_solver=iterative_linear_solver
+            iterative_linear_solver=iterative_linear_solver, scheme=scheme
         )
         init_model.prepare_simulation()
         # Manual grid/energy-balance/AD warm-up, mirrors run_example_3.py. That
@@ -257,7 +258,7 @@ def run_diagnostic(
     if init_model is not None:
         model.initialization_model = init_model
     nonlinear_solver = set_nonlinear_solver(
-        iterative_linear_solver=iterative_linear_solver
+        iterative_linear_solver=iterative_linear_solver, scheme=scheme
     )
     t0_main = time.perf_counter()
     reset_time_io()
