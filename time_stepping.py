@@ -57,6 +57,8 @@ def time_steppers_coso(
     is_transition: np.ndarray | None = None,
     dt_start_transition: float = 2.0,
     dt_start_first: float | None = None,
+    dt_max_divisor: float = 2.0,
+    dt_min: float = 1e-2,
 ) -> tuple[TimeStepper, TimeStepper]:
     """Per-interval time stepper for run_example_2/3's production schedule.
 
@@ -91,11 +93,16 @@ def time_steppers_coso(
 
     ``dt_start_first`` overrides the first interval's ``dt_start`` only, leaving the
     rest untouched; see the comment at its use below.
+
+    ``dt_max_divisor`` sets every interval's ``dt_max`` to ``length / dt_max_divisor``
+    (so with the default 2, a bin-only interval is covered in two steps), and
+    ``dt_min`` is the smallest step any interval may shrink to before the run is
+    aborted. Both are exposed so analyze_time_stepping.py can replay alternatives.
     """
     # Target reduction factor per interval boundary crossing. This sets the
     # maximum time step size for each interval as a fraction of the interval
     # length. Tailor per interval here if needed.
-    ks = np.full(schedule.shape[0] - 1, 2.0)
+    ks = np.full(schedule.shape[0] - 1, dt_max_divisor)
     interval_lengths = np.diff(schedule)
     decrease_factor, increase_factor = iter_relax_factors
 
@@ -119,11 +126,11 @@ def time_steppers_coso(
         TimeInterval.create(
             t_start=t_start,
             dt_start=dt_start,
-            dt_min=1e-2,
+            dt_min=dt_min,
             dt_max=length / k,
             constraints=[
                 TargetNonlinearIterations(
-                    dt_min=1e-2,
+                    dt_min=dt_min,
                     iter_min=iter_optimal_range[0],
                     iter_max=iter_optimal_range[1],
                     increase_factor=increase_factor,

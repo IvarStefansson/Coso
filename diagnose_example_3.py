@@ -68,10 +68,10 @@ def run_diagnostic(
     velocity: float = 0.0,
     # --- solver ---
     iterative_linear_solver: bool = False,
-    scheme: str = "sequential",
+    scheme: str = "monolithic",  # "monolithic" or "sequential"
     # --- init phase ---
     run_init: bool = True,
-    friction_coefficient: float = 0.6,
+    friction_coefficient: float = 10.6,
     # --- saving (override freely) ---
     folder_name: str = "diagnostics/single_fracture",
     folder_name_init: Optional[str] = None,
@@ -143,7 +143,7 @@ def run_diagnostic(
         "file_name": file_name,
         "data_folder_name": f"{folder_name}_saved_data",
         "adaptive_indicator_scaling": True,
-        "use_wells": True,
+        "use_wells": False,
         "reference_variable_values": pp.ReferenceVariableValues(
             temperature=pp.Celsius_to_Kelvin(20),
             pressure=pp.ATMOSPHERIC_PRESSURE,

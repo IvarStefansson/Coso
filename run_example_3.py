@@ -63,7 +63,7 @@ from nl_params import set_nonlinear_solver
 from wells import _WellDataBase
 
 REPO_ROOT = Path(__file__).resolve().parent
-
+FINE_RUN = True
 LOG_TO_FILE = False
 log_dir = "example_3_logs"
 FINAL_TIME = 2 * pp.YEAR
@@ -76,6 +76,22 @@ USE_ITERATIVE_SOLVER = True
 # `main`-branch setup, a single Newton over the fully coupled system preconditioned by
 # pp_solvers.thm_factory.
 SOLVER_SCHEME = "sequential"
+# SOLVER_SCHEME = "monolithic"
+# Adaptive time-stepper settings for the main run. Passed to time_steppers_coso and
+# recorded in run_config.json, so analyze_time_stepping.py can compare runs made with
+# different settings. Note that iter_optimal_range is measured in whatever the
+# nonlinear solver counts as one iteration: outer iterations for "sequential", Newton
+# iterations for "monolithic".
+TIME_STEPPER_PARAMS = {
+    "iter_optimal_range": (10, 15),
+    "iter_relax_factors": (0.6, 2.5),
+    "recomp_factor": 0.2,
+    "max_attempts": 10,
+    "dt_start_transition": 10,
+    "dt_max_divisor": 2.0,
+    "dt_min": 1e-2,
+}
+
 USE_CONSTRAINTS = (
     False  # If False, omit ConstraintsCapcrockAndReservoirDepth from the model stack
 )
@@ -578,8 +594,10 @@ def names_from_params(
     # folder_name resolves against whatever the launching shell's cwd happens to be,
     # which silently scatters output across the filesystem depending on where the
     # script was invoked from.
+    if FINE_RUN:
+        simulation_name = "fine_run/" + simulation_name
     if use_iterative_solver:
-        folder_name = str(REPO_ROOT / "Case_III_applied" / simulation_name)  # applied
+        folder_name = str(REPO_ROOT / f"Case_III_{SOLVER_SCHEME}" / simulation_name)
     else:
         folder_name = str(REPO_ROOT / "Case_III_direct_solver" / simulation_name)
 
@@ -751,7 +769,7 @@ exclude_faults = [
     # "0005",  # Intersects both production wells, extended in
     # config to ensure intersection.
     "0006",  # Intersects 5. Favourable for shut-in?
-    # "0007",  # Intersects 5. Favourable for shut-in? Tiny, though.
+    "0007",  # Intersects 5. Favourable for shut-in? Tiny, though.
     "0008",
     "0009",
     "0010",
@@ -779,6 +797,8 @@ if __name__ == "__main__":
                 refinement = 1.0 if USE_ITERATIVE_SOLVER else 3.0
                 if not USE_CONSTRAINTS:
                     refinement /= 2.2
+                if FINE_RUN:
+                    refinement *= 0.7
                 cell_size = 10e2 * refinement
                 cell_size_fracture = 0.4 * fracture_size * refinement
                 cell_size_min = 0.5 * cell_size_fracture
@@ -885,10 +905,9 @@ if __name__ == "__main__":
                 time_stepper, time_stepper_init = time_steppers_coso(
                     schedule,
                     dt,
-                    iter_optimal_range=(10, 15),
                     is_transition=is_transition,
-                    dt_start_transition=10,
                     dt_start_first=restart_dt_first if RESTART_FROM_CRASH else None,
+                    **TIME_STEPPER_PARAMS,
                 )
                 solid_values_local = copy.deepcopy(granodiorite_values)
                 solid_values_init = copy.deepcopy(solid_values_local)
@@ -912,6 +931,7 @@ if __name__ == "__main__":
 
                     continue
                 log_summary(velocity, period, with_prod)
+                print(folder_name, file_name, title)
                 # Re-fitted c_T for T range 20-243 degC (Davatzes & Hickman gradient
                 # 150/20 mK/m): depth-weighted optimal vs IAPWS-IF97 gives c_T = 9.26e-4
                 # K^-1 (RMSE ~9 kg/m3) vs the water table default of 2.07e-4 K^-1 (RMSE
@@ -1000,6 +1020,9 @@ if __name__ == "__main__":
                     neumann_intervals=neumann_intervals,
                     is_transition=is_transition,
                     dt=dt,
+                    time_stepper_params=TIME_STEPPER_PARAMS,
+                    solver_scheme=SOLVER_SCHEME,
+                    fine_run=FINE_RUN,
                 )
                 init_model = InitializationModel(model_params_init)
                 if RESTART_FROM_CRASH:
@@ -1137,6 +1160,9 @@ if __name__ == "__main__":
                     neumann_intervals=neumann_intervals,
                     is_transition=is_transition,
                     dt=dt,
+                    time_stepper_params=TIME_STEPPER_PARAMS,
+                    solver_scheme=SOLVER_SCHEME,
+                    fine_run=FINE_RUN,
                     friction_coefficient=friction_coeff
                     if not HETEROGENEOUS_FRICTION_COEFFICIENTS
                     else friction_coeffs,
