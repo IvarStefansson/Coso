@@ -446,7 +446,7 @@ class HeterogeneousPermeabilitySpecification:
         if not self.params.get("heterogeneous_permeability", False):
             return super().matrix_permeability(subdomains)
         if len(subdomains) == 0:
-            return pp.wrap_as_dense_ad_array(0, size=0)
+            return pp.wrap_as_dense_ad_array(0, size=0, grids=[])
         permeability = self.permeability_vals(subdomains)
         return self.isotropic_second_order_tensor(subdomains, permeability)
 
@@ -458,7 +458,7 @@ class HeterogeneousPermeabilitySpecification:
         # Set permeability in the high permeability zones.
         vals[high_perm_zones] *= 1000
         permeability = pp.wrap_as_dense_ad_array(
-            vals, size, name="heterogeneous_permeability"
+            vals, size=size, name="heterogeneous_permeability", grids=subdomains
         )
         return permeability
 
@@ -505,7 +505,7 @@ class HeterogeneousFrictionCoefficient:
         if not self.params.get("heterogeneous_friction_coefficient", False):
             return super().friction_coefficient(subdomains)
         if len(subdomains) == 0:
-            return pp.wrap_as_dense_ad_array(0, size=0)
+            return pp.wrap_as_dense_ad_array(0, size=0, grids=[])
         friction_coefficients = self.params["friction_coefficients"]
         vals = []
         for sd in subdomains:
@@ -518,7 +518,9 @@ class HeterogeneousFrictionCoefficient:
                 )
             vals.append(np.full(sd.num_cells, friction_coefficients[key]))
         return pp.wrap_as_dense_ad_array(
-            np.hstack(vals), name="heterogeneous_friction_coefficient"
+            np.hstack(vals),
+            name="heterogeneous_friction_coefficient",
+            grids=subdomains,
         )
 
 
@@ -660,6 +662,7 @@ class HagenPoiseuilleWellPermeability:
             size=sum(sd.num_cells for sd in subdomains)
             * 9,  # 9 for second-order tensor in 3D
             name="intersection_permeability",
+            grids=subdomains,
         )
         if len(wells) > 0:
             well_size = sum(sd.num_cells for sd in wells)
@@ -667,6 +670,7 @@ class HagenPoiseuilleWellPermeability:
                 well_perm_scalar,
                 size=well_size,
                 name="hagen_poiseuille_well_permeability",
+                grids=wells,
             )
             well_tensor = self.isotropic_second_order_tensor(wells, well_perm)
             permeability = (
@@ -700,7 +704,11 @@ class PhysicalModel(
         """
         # Inherit poromechanical porosity from base class.
         phi = super().matrix_porosity(subdomains)
-        f_max = pp.ad.Function(pp.ad.maximum, "maximum_function")
+        f_max = pp.ad.Function(
+            pp.ad.maximum,
+            "maximum_function",
+            pp.ad.OperatorSpace.from_domains(subdomains),
+        )
         f_max.set_name("max for porosity")
         eps = 1e-8
         lower_bounded = f_max(phi, pp.ad.Scalar(eps))

@@ -37,7 +37,7 @@ from solution_strategy import SolutionStrategy
 from initial_conditions import CopyInitialCondition
 from exporting import CosoExporter, GeometryExporting, summarize_slip_onset_times
 from wells import WellDataConceptual
-from porepy.numerics.nonlinear import line_search
+from porepy.numerics.solvers import line_search
 import diff_tpfa
 import logging
 import sys

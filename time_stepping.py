@@ -7,6 +7,7 @@ from porepy.time_stepper import (
     TimeInterval,
     TimeScheduler,
     TimeStepper,
+    TimeManager,
     assemble_default_time_scheduler,
 )
 
@@ -33,18 +34,21 @@ def build_time_stepper(
     it, and Newton's iteration cap is controlled independently via
     ``nl_params.py``'s ``nl_max_iterations``.
     """
-    scheduler = assemble_default_time_scheduler(
+    time_manager = TimeManager(
         schedule=schedule,
         dt_init=dt_init,
         constant_dt=constant_dt,
-        dt_min=dt_min,
-        dt_max=dt_max,
-        nonlinear_iter_optimal_range=iter_optimal_range,
-        nonlinear_iter_relax_factors=iter_relax_factors,
-        nonlinear_iter_retry_factor=recomp_factor,
+        dt_min_max=(dt_min, dt_max),
+        iter_optimal_range=iter_optimal_range,
+        iter_relax_factors=iter_relax_factors,
+        recomp_factor=recomp_factor,
         atol=dt_snap,
     )
-    return TimeStepper(scheduler=scheduler, max_attempts=max_attempts)
+    scheduler = assemble_default_time_scheduler(time_manager=time_manager)
+    time_stepper = TimeStepper(scheduler=scheduler, max_attempts=max_attempts)
+    # Models must be constructed with this manager (params["time_manager"]).
+    time_stepper.time_manager = time_manager
+    return time_stepper
 
 
 def time_steppers_coso(
@@ -130,7 +134,6 @@ def time_steppers_coso(
             dt_max=length / k,
             constraints=[
                 TargetNonlinearIterations(
-                    dt_min=dt_min,
                     iter_min=iter_optimal_range[0],
                     iter_max=iter_optimal_range[1],
                     increase_factor=increase_factor,
@@ -144,10 +147,18 @@ def time_steppers_coso(
             zip(schedule[:-1], interval_lengths, ks, dt_starts)
         )
     ]
+    time_manager = TimeManager(
+        schedule=pp.time_stepper.Schedule(intervals, t_end=schedule[-1])
+    )
     time_stepper = TimeStepper(
-        scheduler=TimeScheduler(intervals=intervals, t_end=schedule[-1], dt_snap=1e-5),
+        scheduler=TimeScheduler(
+            time_manager=time_manager,
+            schedule=time_manager.schedule,
+            t_snap=1e-5,
+        ),
         max_attempts=max_attempts,
     )
+    time_stepper.time_manager = time_manager
 
     # 5e10 s ~ 1580 years, which is safely below the production period for all cases.
     dt_init = 5e9
@@ -165,19 +176,4 @@ def time_steppers_coso(
 
 
 def reset_time_io() -> None:
-    """Clear the process-wide ``TimeIO`` singleton's accumulated history.
-
-    ``porepy.time_stepper.scheduler.TimeIO`` is a process-lifetime singleton:
-    every ``TimeScheduler``/``TimeSchedulerConstantDt`` grabs the same
-    instance, and each successful time step appends to its
-    ``exported_times``/``exported_dt`` lists, so writing ``times.json`` at any
-    point dumps the *entire* accumulated history since process start. There is
-    no reset hook and no per-scheduler injection point. Call this immediately
-    before every ``ModelRunner(...).run()`` in a script that constructs more
-    than one model (e.g. an init run followed by a main run, repeated over a
-    sweep), or a run's ``times.json`` will contain entries left over from
-    every prior run in the same process.
-    """
-    io = pp.time_stepper.scheduler.TimeIO()
-    io.exported_times.clear()
-    io.exported_dt.clear()
+    """(this is not needed anymore, feel free to remove)"""

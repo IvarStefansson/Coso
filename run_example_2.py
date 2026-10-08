@@ -554,9 +554,9 @@ if __name__ == "__main__":
                 simulation_summaries.append(
                     {
                         "name": simulation_name,
-                        "init_steps": init_model.time_data.time_index_successful,
+                        "init_steps": init_model.time_manager.time_index,
                         "init_wall_time": t1_init - t0_init,
-                        "main_steps": model.time_data.time_index_successful,
+                        "main_steps": model.time_manager.time_index,
                         "main_wall_time": t1_main - t0_main,
                     }
                 )

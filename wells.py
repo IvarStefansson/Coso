@@ -89,7 +89,7 @@ class _WellDataBase:
 
     def wells_active(self) -> bool:
         return (
-            self.time_data.time > self.time_data.schedule[self.well_protocol_offset()]
+            self.time_manager.time > self.time_manager.schedule.get_array()[self.well_protocol_offset()]
         )
 
     def well_protocol_index(self, data) -> int:
@@ -107,7 +107,7 @@ class _WellDataBase:
         # The schedule is 0, start_time, end day 0, end day 1, end day 2, ...
         # Find the index of the current time in the schedule.
         return int(
-            np.searchsorted(np.arange(data.shape[0]) * pp.DAY, self.time_data.time)
+            np.searchsorted(np.arange(data.shape[0]) * pp.DAY, self.time_manager.time)
             - self.well_protocol_offset()
             - 1
         )
@@ -236,7 +236,7 @@ class WellDataCoso(_WellDataBase):
             ind[where] = 1
             sd.tags["open_well_cells"] = ind
             all_vals.append(ind)
-        return pp.ad.DenseArray(np.hstack(all_vals))
+        return pp.wrap_as_dense_ad_array(np.hstack(all_vals), grids=subdomains)
 
 
 class WellDataConceptual(_WellDataBase):
@@ -322,7 +322,9 @@ class WellDataConceptual(_WellDataBase):
             subdomains: Subdomains where to open well cells.
         """
         if len(subdomains) == 0:
-            return pp.ad.DenseArray(np.array([]), "open_well_cells")
+            return pp.wrap_as_dense_ad_array(
+                np.array([]), name="open_well_cells", grids=[]
+            )
         all_vals = []
         for sd in subdomains:
             if not self.is_well_grid(sd):
@@ -331,7 +333,9 @@ class WellDataConceptual(_WellDataBase):
                 vals = self.set_open_well_cells(sd)
             all_vals.append(vals)
         all_vals = np.hstack(all_vals)
-        return pp.ad.DenseArray(all_vals, "open_well_cells")
+        return pp.wrap_as_dense_ad_array(
+            all_vals, name="open_well_cells", grids=subdomains
+        )
 
     # def update_time_dependent_ad_arrays(self) -> None:
     #     """Update time-dependent ad arrays."""

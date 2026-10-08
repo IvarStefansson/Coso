@@ -22,6 +22,7 @@ def clip_decorator(a: float, b: float):
             f_heaviside = pp.ad.Function(
                 partial(pp.ad.functions.heaviside, 0.0),
                 "heaviside_function_for_clipping",
+                pp.ad.OperatorSpace.from_domains(args[1]),
             )
             return (
                 f
@@ -254,7 +255,11 @@ class Foo:
             subdomains: List of fracture subdomains.
 
         """
-        f_heaviside = pp.ad.Function(partial(pp.ad.heaviside, 0), "heaviside_function")
+        f_heaviside = pp.ad.Function(
+            partial(pp.ad.heaviside, 0),
+            "heaviside_function",
+            pp.ad.OperatorSpace.from_domains(subdomains),
+        )
         return pp.ad.Scalar(0)  # f_heaviside(self.fracture_locking_variable)
 
     @clip_decorator(1e-5, 1.0 - 1e-5)

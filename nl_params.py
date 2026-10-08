@@ -167,7 +167,6 @@ def _monolithic_nonlinear_solver(iterative_linear_solver: bool):
             configuration_factory=pp_solvers.thm_factory,
             solver_options=options,
             solver_selector=solver_selector if USE_SOLVER_SELECTOR else None,
-            debug_dump_dir=LINEAR_SYSTEM_DUMP_DIR / "monolithic",
         )
     # ConstraintLineSearchNonlinearSolver operates on the full system by construction
     # (it rejects equation_tags/variable_tags), which is exactly the monolithic case.
@@ -207,12 +206,10 @@ def set_nonlinear_solver(iterative_linear_solver=False, scheme="sequential"):
     if iterative_linear_solver:
         linear_solver_mechanics = pp_solvers.IterativeLinearSolver(
             configuration_factory=pp_solvers.momentum_balance_factory,
-            debug_dump_dir=LINEAR_SYSTEM_DUMP_DIR / "mechanics",
         )
         linear_solver_pT = pp_solvers.IterativeLinearSolver(
             delete_matrices=False,
             configuration_factory=th_linear_solver_factory,
-            debug_dump_dir=LINEAR_SYSTEM_DUMP_DIR / "pT",
             solver_options={
                 # "gmres": {
                 #     "ksp_monitor": None,

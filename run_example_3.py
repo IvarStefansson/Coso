@@ -826,7 +826,7 @@ if __name__ == "__main__":
                     # t=0. Slicing `schedule`/`is_transition` here (before
                     # `time_steppers_coso` builds the per-interval scheduler) is
                     # required: porepy's scheduler always starts at `schedule[0]`, it
-                    # does not pick up from `model.time_data.time`.
+                    # does not pick up from `model.time_manager.time`.
                     restart_options_main = latest_restart_options(
                         folder_name, file_name, RESTART_STEPS_BACK
                     )
@@ -999,6 +999,8 @@ if __name__ == "__main__":
                 if restart_options_init is not None:
                     model_params_init["restart_options"] = restart_options_init
                 model_params = copy.deepcopy(model_params_init)
+                model_params_init["time_manager"] = time_stepper_init.time_manager
+                model_params["time_manager"] = time_stepper.time_manager
                 if with_prod:
                     injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
                     production_p = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
@@ -1079,7 +1081,7 @@ if __name__ == "__main__":
                         "RESTART_FROM_CRASH: init model restored to time=%.6g "
                         "(source=%s); skipped re-running its equilibration loop "
                         "and its convergence check.",
-                        init_model.time_data.time,
+                        init_model.time_manager.time,
                         folder_name_init,
                     )
                 else:
@@ -1182,7 +1184,7 @@ if __name__ == "__main__":
                 )
                 reset_time_io()
                 # Construct the runner separately from .run(): ModelRunner.__init__
-                # seeds model.time_data from the scheduler (schedule included) and
+                # seeds model.time_manager from the scheduler (schedule included) and
                 # only then calls prepare_simulation(), which is where a restart's
                 # reset_state_from_file() runs. Preparing the model by hand before
                 # this would leave it on SolutionStrategy's placeholder [0, 1]
@@ -1195,7 +1197,7 @@ if __name__ == "__main__":
                     logger.info(
                         "RESTART_FROM_CRASH: main model restored to time=%.6g "
                         "(source pvd=%s)",
-                        model.time_data.time,
+                        model.time_manager.time,
                         restart_options_main["pvd_file"],
                     )
                     if RESTART_DRY_RUN:
@@ -1208,9 +1210,9 @@ if __name__ == "__main__":
                 simulation_summaries.append(
                     {
                         "name": simulation_name,
-                        "init_steps": init_model.time_data.time_index_successful,
+                        "init_steps": init_model.time_manager.time_index,
                         "init_wall_time": t1_init - t0_init,
-                        "main_steps": model.time_data.time_index_successful,
+                        "main_steps": model.time_manager.time_index,
                         "main_wall_time": t1_main - t0_main,
                     }
                 )

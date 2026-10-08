@@ -146,14 +146,13 @@ class EllipticFractureGeometry(CosoGeometry):
         # Create a single elliptic fracture
         num_points = 10
         self._fractures = [
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=strike,
+                strike_angle=np.pi / 2 - strike,
                 dip_angle=dip,
                 major_axis=7.5e2,
                 minor_axis=7.5e2,
                 major_axis_angle=0,
-                num_points=num_points,
             )
         ]
         # -0.903*easting +1.738*northing + 7.939 = z
@@ -167,14 +166,13 @@ class EllipticFractureGeometry(CosoGeometry):
         )
         # Create a single elliptic fracture
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=strike,
+                strike_angle=np.pi / 2 - strike,
                 dip_angle=dip,
                 major_axis=750,
                 minor_axis=750,
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
 
@@ -240,14 +238,13 @@ class FractureGeometry2(EllipticFractureGeometry):
         # Create a single elliptic fracture
         num_points = 12
         self._fractures = [
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=strike,
+                strike_angle=np.pi / 2 - strike,
                 dip_angle=dip,
                 major_axis=5.0e2,
                 minor_axis=5.0e2,
                 major_axis_angle=0,
-                num_points=num_points,
             )
         ]
         dz = -0.196
@@ -264,28 +261,26 @@ class FractureGeometry2(EllipticFractureGeometry):
         )
         strike, dip = plane_equation_to_strike_dip(A, B, C, D)
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=strike,
+                strike_angle=np.pi / 2 - strike,
                 dip_angle=dip,
                 major_axis=5.0e2,
                 minor_axis=5.0e2,
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
         center_injection = self.units.convert_units(
             np.array([1.1, -3.4, -1.9]) * pp.KILO * pp.METER, "m"
         )
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center_injection,
-                strike_angle=0,
+                strike_angle=np.pi / 2,
                 dip_angle=0,
                 major_axis=3.0e2,
                 minor_axis=3.0e2,
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
 
@@ -471,7 +466,9 @@ class ConceptualGeometryTwoFractures(ConceptualGeometry):
                     "Grid is marked as well grid but is neither production nor injection."
                 )
         r_w = np.concatenate(r_w)
-        radius = pp.ad.DenseArray(r_w, name="well_radius")
+        radius = pp.wrap_as_dense_ad_array(
+            r_w, name="well_radius", grids=subdomains
+        )
         return radius
 
     @property
@@ -666,50 +663,46 @@ class LargeGeometry(TwoEllipticFractures3d):
         minor_axes = np.full((4,), 7.5e2)
         angle = params["strike_angle"]
         self._fractures = [
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=np.array([x, y_max - 5 * dy, z]),
-                strike_angle=np.pi / 2,
+                strike_angle=0,
                 dip_angle=np.pi / 2,
                 major_axis=major_axes[0],
                 minor_axis=minor_axes[0],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         ]
         # Production fracture
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=np.array([x, y_max - 3 * dy, z]),
-                strike_angle=angle,
+                strike_angle=np.pi / 2 - angle,
                 dip_angle=np.pi / 2,
                 major_axis=major_axes[1],
                 minor_axis=minor_axes[1],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
         # Fracture between injection and production
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=np.array([x, y_max - 4 * dy, z]),
-                strike_angle=angle,
+                strike_angle=np.pi / 2 - angle,
                 dip_angle=np.pi / 2,
                 major_axis=major_axes[2],
                 minor_axis=minor_axes[2],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
         # Passive fracture outside reservoir.
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=np.array([x, 3 * dy, z]),
-                strike_angle=angle,
+                strike_angle=np.pi / 2 - angle,
                 dip_angle=np.pi / 2,
                 major_axis=major_axes[3],
                 minor_axis=minor_axes[3],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
 
@@ -736,40 +729,37 @@ class CoolingGeometry(TwoEllipticFractures3d):
         num_points = params.get("num_points", 14)
 
         self._fractures = [  # First the injection fracture
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center_injection,
-                strike_angle=params["strike_angles"][0],
+                strike_angle=np.pi / 2 - params["strike_angles"][0],
                 dip_angle=np.pi / 2,
                 major_axis=r[0],
                 minor_axis=r[0],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         ]
         center = np.array([x + dx + params.get("center_fracture_x_offset", 0), y, z])
         # Center fracture
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=params["strike_angles"][1],
+                strike_angle=np.pi / 2 - params["strike_angles"][1],
                 dip_angle=np.pi / 2,
                 major_axis=r[1],
                 minor_axis=r[1],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
         center = np.array([x + 2 * dx, y, z])
         # Production fracture, always connected.
         self._fractures.append(
-            pp.create_elliptic_fracture(
+            pp.EllipticFracture(
                 center=center,
-                strike_angle=params["strike_angles"][2],
+                strike_angle=np.pi / 2 - params["strike_angles"][2],
                 dip_angle=np.pi / 2,
                 major_axis=r[2],
                 minor_axis=r[2],
                 major_axis_angle=0,
-                num_points=num_points,
             )
         )
 

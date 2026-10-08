@@ -236,7 +236,9 @@ class CopyInitialCondition:
             vals.append(
                 model.plastic_displacement_jump([other]).value(model.equation_system)
             )
-        return pp.ad.DenseArray(np.hstack(vals), name="reference_displacement_jump")
+        return pp.wrap_as_dense_ad_array(
+            np.hstack(vals), name="reference_displacement_jump", grids=subdomains
+        )
 
     def shear_dilation_gap(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Shear dilation [m].
@@ -249,10 +251,17 @@ class CopyInitialCondition:
 
         """
         angle: pp.ad.Operator = self.dilation_angle(subdomains)
-        f_norm = pp.ad.Function(
-            partial(pp.ad.functions.l2_norm, self.nd - 1), "norm_function"
+        scalar_space = pp.ad.OperatorSpace.from_domains(subdomains)
+        tangential_space = pp.ad.OperatorSpace.from_domains(
+            subdomains, {pp.ad.GridEntity.cells: self.nd - 1}
         )
-        f_tan = pp.ad.Function(pp.ad.functions.tan, "tan_function")
+        f_norm = pp.ad.Function(
+            partial(pp.ad.functions.l2_norm, self.nd - 1),
+            "norm_function",
+            tangential_space,
+            scalar_space,
+        )
+        f_tan = pp.ad.Function(pp.ad.functions.tan, "tan_function", scalar_space)
         shear_dilation: pp.ad.Operator = f_tan(angle) * f_norm(
             self.tangential_component(subdomains)
             @ (
