@@ -379,7 +379,7 @@ class CosoBackgroundValues:
         # Displacement gradient set to .1 mm/km.
         # For the moment, we use a constant gradient in each direction.
         gradient = (
-            self.parameters.get(
+            self.params.get(
                 "lithostatic_stress_multipliers", np.array([1.0, 1.0, 1.0])
             )
             * (

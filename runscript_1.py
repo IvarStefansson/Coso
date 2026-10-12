@@ -1,10 +1,12 @@
-import copy
+from collections import defaultdict
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+import pandas as pd
 import porepy as pp
 
 from boundary_conditions import (
@@ -12,17 +14,17 @@ from boundary_conditions import (
     NeumannWellBCsFromSchedule,
     SmoothWellTransitions,
 )
-from geometry import FaultPlaneGeometry
+from exporting import CosoExporter, GeometryExporting
+from geometry import CosoGeometry
 from material_parameters import granodiorite_values
+from nl_params import set_nonlinear_solver
 from physical_model import (
-    HeterogeneousFrictionCoefficient,
+    CosoBackgroundValues,
+    HagenPoiseuilleWellPermeability,
     HeterogeneousPermeabilitySpecification,
     PhysicalModel,
-    HagenPoiseuilleWellPermeability,
-    CosoBackgroundValues,
 )
 from porepy.applications.boundary_conditions.model_boundary_conditions import (
-    BoundaryConditionsMechanicsNeumann,
     HydrostaticBoundaryPressureValues,
     LithostaticBoundaryStressValues,
     ThermalGradientBoundaryTemperatureValues,
@@ -31,26 +33,44 @@ from porepy.applications.initial_conditions.model_initial_conditions import (
     InitialConditionHydrostaticPressureValues,
     InitialConditionThermalGradientTemperatureValues,
 )
-from porepy.examples.geothermal_reservoir import WellBoundaryConditions
+from porepy.examples.geothermal_reservoir import (
+    WellBCType,
+    WellBoundaryConditions,
+    WellInterval,
+)
 from porepy.models.contact_mechanics import (
     RadialReturnTangentialContactMechanicsEquation,
 )
 from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
-
-from exporting import CosoExporter, GeometryExporting
-from initial_conditions import CopyInitialCondition
-from nl_params import set_nonlinear_solver
 from solution_strategy import SolutionStrategy
-from time_stepping import reset_time_io, time_steppers_coso
+from time_stepping import time_steppers_coso
 from wells import _WellDataBase
+from porepy.applications.initialization.initialization import (
+    initialization_pipeline,
+    default_rate_tolerances,
+    default_initialization_time_manager,
+    default_residual_tolerances,
+)
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
+# ----------------------------------------------------------------------------------
+# Run settings
+# ----------------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parent
+OUTPUT_FOLDER = REPO_ROOT / "well_tip_fracture_run"
+FILE_NAME = Path(__file__).stem
+
 FINAL_TIME = 2 * pp.YEAR
+PRODUCTION_PERIOD = 1 * pp.YEAR
 SHUT_IN_DURATION = 3 * pp.DAY
-NUM_BINS_PER_INTERVAL = 3
+INITIAL_SHUTIN_DURATION = 2 * pp.DAY  # Zero-flux period at t=0.
+TRANSITION_DURATION = 2 * pp.HOUR  # Length of the Neumann <-> Dirichlet ramps.
+NUM_BINS_PER_INTERVAL = 3  # Extra output times per production / shut-in interval.
+
+BOUNDARY_STRAIN_RATE = 1.0e-6  # [1/year], tectonic extension in x.
+CELL_SIZE_BOUNDARY = 318.0 * 2  # [m]
+CELL_SIZE_FRACTURE = 76.0 * 2  # [m]
+CELL_SIZE_MIN = 38.0 * 2  # [m]
+
 SOLVER_SCHEME = "monolithic"
 TIME_STEPPER_PARAMS = {
     "iter_optimal_range": (10, 15),
@@ -62,20 +82,120 @@ TIME_STEPPER_PARAMS = {
     "dt_min": 1e-2,
 }
 
-# Single run: strain rate [m/year], production period [years], transition [s].
-VELOCITY = 1.0e-6
-PERIOD = 1.0
-TRANSITION_DURATION = 2 * pp.HOUR
-INITIAL_SHUTIN_DURATION = 2 * pp.DAY
-MINIMUM_FRICTION = 0.2
-EXCLUDE_FAULTS = ["0002", "0004", "0006", "0007", "0008", "0009", "0010", "0011", "0012"]
+
+# ----------------------------------------------------------------------------------
+# Geometry: the real wells, and one artificial fracture connecting their bottom tips
+# ----------------------------------------------------------------------------------
+class WellTipFractureGeometry(CosoGeometry):
+    """Domain around the Coso wells with a single planar fracture through the tips.
+
+    The wells are the straight lines read by ``CosoGeometry.set_well_network`` (surface
+    point above the first survey point to the deepest survey point). The fracture is
+    a rectangle in the plane through the three bottom tips, with sides along the
+    strike (horizontal) and dip directions. It is the bounding rectangle of the tips,
+    enlarged by ``fracture_scale`` so that the tips lie inside it.
+    """
+
+    fracture_scale = 1.3
+    domain_padding_xy = 2.0e3
+    domain_padding_z = 1.5e3
+
+    def _well_lines(self) -> np.ndarray:
+        """Wellhead and bottom tip of each well, shape ``(num_wells, 3, 2)``."""
+        lines = []
+        with pd.ExcelFile(f"{sys.path[0]}/data/wellbores.xlsx") as xls:
+            for name in self.well_names:
+                df = pd.read_excel(xls, sheet_name=name, usecols=[3, 4, 5], skiprows=1)
+                # The file stores y, x, z with depth positive down.
+                pts = df.iloc[:, [1, 0, 2]].values.T
+                pts[2] *= -1
+                tip = pts[:, np.argmin(pts[2])]
+                head = np.array([pts[0, 0], pts[1, 0], 0.0])
+                lines.append(np.column_stack([head, tip]))
+        return np.array(lines)
+
+    def set_domain(self) -> None:
+        points = np.hstack(self._well_lines())
+        pad_xy, pad_z = self.domain_padding_xy, self.domain_padding_z
+        self._domain = pp.Domain(
+            bounding_box={
+                "xmin": points[0].min() - pad_xy,
+                "xmax": points[0].max() + pad_xy,
+                "ymin": points[1].min() - pad_xy,
+                "ymax": points[1].max() + pad_xy,
+                "zmin": points[2].min() - pad_z,
+                "zmax": 0.0,
+            }
+        )
+
+    def set_fractures(self) -> None:
+        tips = self._well_lines()[:, :, 1].T  # (3, num_wells)
+        origin = tips.mean(axis=1)
+        normal = np.cross(tips[:, 1] - tips[:, 0], tips[:, 2] - tips[:, 0])
+        # In-plane directions: strike (horizontal) and dip (steepest descent).
+        strike = np.cross(normal, [0.0, 0.0, 1.0])
+        if np.linalg.norm(strike) == 0.0:
+            raise ValueError("The well tips span a horizontal plane.")
+        strike /= np.linalg.norm(strike)
+        dip = np.cross(normal, strike)
+        dip /= np.linalg.norm(dip)
+        # Bounding rectangle of the tips in (strike, dip) coordinates.
+        local = np.array([strike, dip]) @ (tips - origin[:, None])
+        center = (local.max(axis=1) + local.min(axis=1)) / 2
+        half = self.fracture_scale * (local.max(axis=1) - local.min(axis=1)) / 2
+        signs = np.array([[-1, 1, 1, -1], [-1, -1, 1, 1]])
+        corners_local = center[:, None] + half[:, None] * signs
+        corners = origin[:, None] + np.array([strike, dip]).T @ corners_local
+        self._fractures = [pp.PlaneFracture(corners)]
+
+    def fracture_names(self) -> list[str]:
+        return ["well_tip_fracture"]
 
 
-class BaseModel(
+# ----------------------------------------------------------------------------------
+# Initial state and tectonic loading (no initialization run)
+# ----------------------------------------------------------------------------------
+class DepthDisplacementInitialAndBoundaryConditions(CosoBoundaryConditionsDisplacement):
+    """Start from the depth-dependent displacement of ``CosoBackgroundValues``.
+
+    Dirichlet displacement on all outer faces: the initial depth-dependent field plus
+    a uniform extension in x, ``u_x = strain_rate * (x - x_min) * t``. The same field
+    is used as the initial displacement in the domain.
+    """
+
+    def ic_values_displacement(self, sd: pp.Grid) -> np.ndarray:
+        return self.displacement_from_depth(sd.cell_centers).ravel("F")
+
+    def bc_values_displacement(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
+        if boundary_grid.dim < self.nd - 1:
+            return super().bc_values_displacement(boundary_grid)
+        coords = boundary_grid.cell_centers
+        values = self.displacement_from_depth(coords)
+        x_from_boundary = coords[0] - self.domain.bounding_box["xmin"]
+        values += np.outer(self.boundary_displacement_velocity, x_from_boundary) * (
+            self.time_manager.time
+        )
+        return values.ravel("F")
+
+
+# ----------------------------------------------------------------------------------
+# Model
+# ----------------------------------------------------------------------------------
+class CosoModel(
+    # Initial conditions and boundary conditions.
+    CosoBackgroundValues,  # Geotherm, hydrostatic pressure, depth displacement.
+    SmoothWellTransitions,  # Ramps between shut-in and production.
+    NeumannWellBCsFromSchedule,  # Zero-flux wells during shut-in.
+    InitialConditionHydrostaticPressureValues,
+    InitialConditionThermalGradientTemperatureValues,
+    WellBoundaryConditions,
+    DepthDisplacementInitialAndBoundaryConditions,
+    HeterogeneousPermeabilitySpecification,
+    # Geometry, constitutive laws, solution strategy, exporting.
     FractureDeformationExporting,
     GeometryExporting,
     CosoExporter,
-    FaultPlaneGeometry,
+    WellTipFractureGeometry,
     HagenPoiseuilleWellPermeability,
     pp.constitutive_laws.CubicLawPermeability,
     SolutionStrategy,  # Precedence over pp.models.solution_strategy.ContactIndicators
@@ -85,43 +205,15 @@ class BaseModel(
     ThermalGradientBoundaryTemperatureValues,
     LithostaticBoundaryStressValues,
     RadialReturnTangentialContactMechanicsEquation,
-    PhysicalModel,
+    PhysicalModel,  # Gravity + porepy's thermo-poromechanics.
 ):
-    """Model for the Coso geothermal reservoir."""
+    """Coso geothermal reservoir with a single fracture connecting the well tips."""
 
     @property
     def time_step_indices(self) -> np.ndarray:
-        # Index 1 (the step before the latest) is read by
-        # check_initialization_converged() and by CosoExporter.collect_data() for the
-        # fracture displacement-jump increment.
+        # Index 1 (the step before the latest) is read by CosoExporter.collect_data()
+        # for the fracture displacement-jump increment.
         return np.array([0, 1])
-
-    def create_plot_title(self) -> str:
-        return self.params["plot_title"]
-
-
-class InitializationModel(
-    CosoBackgroundValues,
-    InitialConditionHydrostaticPressureValues,
-    InitialConditionThermalGradientTemperatureValues,
-    BoundaryConditionsMechanicsNeumann,
-    BaseModel,
-):
-    """Initialization model for the Coso geothermal reservoir."""
-
-
-class MainModel(
-    CosoBackgroundValues,
-    SmoothWellTransitions,
-    NeumannWellBCsFromSchedule,
-    CopyInitialCondition,
-    WellBoundaryConditions,
-    CosoBoundaryConditionsDisplacement,
-    HeterogeneousPermeabilitySpecification,
-    HeterogeneousFrictionCoefficient,
-    BaseModel,
-):
-    """Main model for the Coso geothermal reservoir."""
 
 
 def create_schedule(
@@ -287,236 +379,130 @@ def create_schedule(
 
     return schedule, neumann_intervals, is_transition
 
-def back_compute_friction_coefficient(init_model, sds, floor_value=1e-3, eps=1e-3):
-    traction = init_model.evaluate_and_scale(sds, "contact_traction", "-").reshape(
-        (3, -1), order="F"
-    )
-    friction_coeff = (
-        np.max(np.linalg.norm(traction[:-1], axis=0) / np.abs(traction[-1, :])) + eps
-    )
-    return np.maximum(friction_coeff, floor_value)
 
+def well_schedule(
+    schedule: np.ndarray, neumann_intervals: list[tuple[float, float]]
+) -> dict[str, list[WellInterval]]:
+    """Well schedule: constant protocol values, Neumann in the shut-in windows.
 
-def compute_friction_coefficients_each_fracture(init_model, floor_value=1e-3, eps=1e-3):
-    friction_coeffs = {}
-    for sd in init_model.mdg.subdomains(dim=2):
-        friction_coeffs[str(sd.frac_num)] = back_compute_friction_coefficient(
-            init_model, [sd], floor_value=floor_value, eps=eps
-        )
-    return friction_coeffs
-
-
-def check_initialization_converged(
-    init_model,
-    rtol: float = 1e-3,
-    variable_names: dict[str, str] | None = None,
-) -> dict[str, float]:
-    """Pragmatic stopgap check that the last initialization step was small.
-
-    A more rigorous steady-state check is planned for porepy itself; this is a
-    cheap interim guard so an unequilibrated initialization doesn't silently
-    seed the (expensive) main run and the friction-coefficient back-computation.
-
-    Compares each variable's state at the last converged step (time_step_index=0)
-    against the step before it (time_step_index=1) and computes the max-abs
-    change relative to the variable's own current max-abs magnitude -- avoids
-    needing separately tuned absolute tolerances for pressure (Pa), temperature
-    (K), and displacement (m). Contact traction and interface/well variables are
-    deliberately excluded: they are Lagrange-multiplier-like quantities without a
-    comparable notion of "relative change".
-
-    Parameters:
-        init_model: The initialization model, after its ModelRunner.run() call.
-        rtol: Shared relative-change tolerance for all checked variables.
-        variable_names: Override the default {label: variable_name} mapping
-            (pressure/temperature/displacement).
-
-    Returns:
-        The computed {label: relative_change} mapping, for logging/inspection.
-
-    Raises:
-        RuntimeError: If any checked variable's relative change exceeds rtol.
+    Each ``neumann_intervals`` entry ``(start, end)`` becomes a Neumann interval of
+    the well schedule; the well is Dirichlet in between.
     """
-    if variable_names is None:
-        variable_names = {
-            "pressure": init_model.pressure_variable,
-            "temperature": init_model.temperature_variable,
-            "displacement": init_model.displacement_variable,
-        }
-    eq = init_model.equation_system
-    relative_changes = {}
-    failures = []
-    for label, var_name in variable_names.items():
-        current = eq.get_variable_values(variables=[var_name], time_step_index=0)
-        previous = eq.get_variable_values(variables=[var_name], time_step_index=1)
-        diff = float(np.max(np.abs(current - previous)))
-        scale = max(float(np.max(np.abs(current))), 1e-12)
-        rel = diff / scale
-        relative_changes[label] = rel
-        logger.info(f"Initialization last-step relative change in {label}: {rel:.3e}")
-        if rel > rtol:
-            failures.append(label)
-    if failures:
-        raise RuntimeError(
-            "Initialization does not appear converged: relative change over the "
-            f"last time step exceeds rtol={rtol:.1e} for {failures}. "
-            f"Relative changes: {relative_changes}. Consider a longer/slower "
-            "initialization schedule (time_stepper_init in time_steppers_coso) "
-            "or review the artificially high initialization permeability."
+    t_start = float(schedule[0])
+    bc_types = {t_start: WellBCType.DIRICHLET}
+    for start, end in neumann_intervals:
+        bc_types[float(start)] = WellBCType.NEUMANN
+        bc_types[float(end)] = WellBCType.DIRICHLET
+
+    def intervals(**values: float) -> list[WellInterval]:
+        return [
+            WellInterval(t, values, bc_type)
+            for t, bc_type in sorted(bc_types.items())
+        ]
+
+    schedules = {}
+    for name in CosoModel.injection_well_names.fget(None):
+        schedules[name] = intervals(
+            pressures=0.3 * pp.MEGA * pp.PASCAL,
+            temperatures=pp.Celsius_to_Kelvin(40),
         )
-    return relative_changes
+    for name in CosoModel.production_well_names.fget(None):
+        schedules[name] = intervals(
+            pressures=pp.ATMOSPHERIC_PRESSURE,
+            temperatures=475.0,  # Expected T at depth.
+        )
+    return schedules
 
 
 if __name__ == "__main__":
-    dt = 1e3
-    production_period = PERIOD * pp.YEAR
-    domain_size = 8.0e3
-    fracture_size = 6e2
-    refinement = 1.0 / 2.2 * 0.7  # iterative solver, no constraints, fine run
-    cell_size = 10e2 * refinement
-    cell_size_fracture = 0.4 * fracture_size * refinement
-    cell_size_min = 0.5 * cell_size_fracture
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("pp_solvers.porepy_integration").setLevel(logging.WARNING)
 
     schedule, neumann_intervals, is_transition = create_schedule(
-        production_period,
+        PRODUCTION_PERIOD,
+        shut_in_duration=SHUT_IN_DURATION,
         final_time=FINAL_TIME,
         num_bins_per_interval=NUM_BINS_PER_INTERVAL,
         transition_duration=TRANSITION_DURATION,
         initial_shutin_duration=INITIAL_SHUTIN_DURATION,
-        with_production=True,
     )
-    folder_name = str(REPO_ROOT / f"Case_III_{SOLVER_SCHEME}" / "single_run")
-    folder_name_init = folder_name + "_initialization"
-    file_name = "example_3"
-    title = f"Strain rate = {VELOCITY:.1g} 1/y, with production"
-
-    time_stepper, time_stepper_init = time_steppers_coso(
-        schedule, dt, is_transition=is_transition, dt_start_first=None,
-        **TIME_STEPPER_PARAMS,
+    time_stepper, _ = time_steppers_coso(
+        schedule, dt=1e3, is_transition=is_transition, **TIME_STEPPER_PARAMS
     )
-    solid_values_local = copy.deepcopy(granodiorite_values)
-    solid_values_init = copy.deepcopy(solid_values_local)
-    solid_values_init["permeability"] *= 1e2  # Faster equilibration in initialization.
 
     # Re-fitted thermal expansion for the Coso T range (see physical_model.py).
     water_values = {**pp.fluid_values.water, "thermal_expansion": 7.8745e-04}
-    model_params_init = {
-        "fault_plane_dirs": ["point_cloud_clusters"],
-        "fault_extension_config": "fault_extensions.json",
-        "exclude_faults": EXCLUDE_FAULTS,
-        "well_sheet_names": {
-            "1 Injection well": "68-20RD",
-            "2 Production well": "16A-20",
-            "3 Production well": "16B-20",
-        },
-        "top_boundary_z": 0.0,
-        "read_well_operation_data": False,
-        "plot_title": title,
-        "domain_sizes": np.array([domain_size, domain_size, 3e3]),
+    model_params = {
+        "file_name": FILE_NAME,
+        "folder_name": str(OUTPUT_FOLDER),
+        "data_folder_name": f"{OUTPUT_FOLDER}_saved_data",
+        "solver_statistics_file_name": "solver_statistics.json",
+        "time_manager": time_stepper.time_manager,
         "material_constants": {
-            "solid": pp.SolidConstants(**solid_values_init),
+            "solid": pp.SolidConstants(**granodiorite_values),
             "fluid": pp.FluidComponent(**water_values),
         },
         "units": pp.Units(m=1.0e0, kg=1.0e9, K=1.0),
-        "grid_type": "simplex",
-        "meshing_arguments": {
-            "cell_size_boundary": cell_size,
-            "cell_size_fracture": cell_size_fracture,
-            "cell_size_min": cell_size_min,
-        },
-        "file_name": file_name,
-        "data_folder_name": f"{folder_name}_saved_data",
-        "adaptive_indicator_scaling": 1,
-        "use_wells": False,
         "reference_variable_values": pp.ReferenceVariableValues(
             temperature=pp.Celsius_to_Kelvin(20),
             pressure=pp.ATMOSPHERIC_PRESSURE,
         ),
-        "fracture_file": "coords.txt",
-        "folder_name": folder_name_init,
-        "solver_statistics_file_name": "solver_statistics.json",
-        "initialization": True,
-        "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
-        "fracture_params": {
-            "fracture_major_axes": np.full(3, fracture_size / domain_size),
-        },
-        "heterogeneous_permeability": True,
-        "darcy_flux_discretization": "tpfa",
-        "fourier_flux_discretization": "tpfa",
-        "use_ic_interpolation": True,
-        "boundary_displacement_velocity": VELOCITY / pp.YEAR,
         "surface_temperature": pp.Celsius_to_Kelvin(20.0),
+        "lithostatic_stress_multipliers": np.array([0.62, 1.55, 1.0]),
+        "grid_type": "simplex",
+        "meshing_arguments": {
+            "cell_size_boundary": CELL_SIZE_BOUNDARY,
+            "cell_size_fracture": CELL_SIZE_FRACTURE,
+            "cell_size_min": CELL_SIZE_MIN,
+        },
+        "adaptive_indicator_scaling": 1,
+        "heterogeneous_permeability": True,
+        "darcy_flux_discretization": "mpfa",
+        "fourier_flux_discretization": "mpfa",
+        "boundary_displacement_velocity": BOUNDARY_STRAIN_RATE / pp.YEAR,
+        "use_wells": True,
+        "well_transition_duration": TRANSITION_DURATION,
+        "well_schedule": well_schedule(schedule, neumann_intervals),
     }
-    model_params = copy.deepcopy(model_params_init)
-    model_params_init["time_manager"] = time_stepper_init.time_manager
-    model_params["time_manager"] = time_stepper.time_manager
 
-    injection_p = np.full(schedule.shape, 0.3 * pp.MEGA * pp.PASCAL)
-    production_p = np.full(schedule.shape, pp.ATMOSPHERIC_PRESSURE)
-    injection_t = np.full(schedule.shape, pp.Celsius_to_Kelvin(40))
-    production_t = np.full(schedule.shape, 475)  # Expected production T at depth.
-    for name in MainModel.injection_well_names.fget(None):
-        model_params[f"{name}_pressures"] = injection_p
-        model_params[f"{name}_temperatures"] = injection_t
-    for name in MainModel.production_well_names.fget(None):
-        model_params[f"{name}_pressures"] = production_p
-        model_params[f"{name}_temperatures"] = production_t
+    model = CosoModel(model_params)
 
-    # Initialization run
-    init_model = InitializationModel(model_params_init)
-    nonlinear_solver = set_nonlinear_solver(
-        iterative_linear_solver=True, scheme=SOLVER_SCHEME
-    )
-    init_model.prepare_simulation()
-    reset_time_io()
-    t0_init = time.perf_counter()
-    pp.ModelRunner(
-        init_model,
-        nonlinear_solver=nonlinear_solver,
-        params={"prepare_simulation": False},
-        time_stepper=time_stepper_init,
-    ).run()
-    t1_init = time.perf_counter()
-    check_initialization_converged(init_model)
-
-    # Per-fracture friction coefficients back-computed from the initialization.
-    friction_coeffs = compute_friction_coefficients_each_fracture(
-        init_model, floor_value=MINIMUM_FRICTION, eps=5e-3
-    )
-    model_params["friction_coefficients"] = friction_coeffs
-    logger.info(f"Friction coefficients from initialization: {friction_coeffs}")
-    # Fallback for subdomains not covered by 'friction_coefficients'.
-    solid_values_local["friction_coefficient"] = max(friction_coeffs.values())
-    model_params.update(
-        {
-            "heterogeneous_friction_coefficient": True,
-            "folder_name": folder_name,
-            "initialization": False,
-            "use_wells": True,
-            "reference_from_initial": True,
-            "material_constants": {
-                "solid": pp.SolidConstants(**solid_values_local),
-                "fluid": pp.FluidComponent(**water_values),
+    initialization_pipeline(
+        model,
+        nonlinear_solver=set_nonlinear_solver(
+            iterative_linear_solver=True,
+            scheme=SOLVER_SCHEME,
+            nonlinear_solver_params={
+                "nl_convergence_res_atol": 1e-5,
+                "nl_convergence_inc_atol": 1e-5,
             },
-            "neumann_intervals": neumann_intervals,
-            "well_transition_duration": TRANSITION_DURATION,
-        }
+        ),
+        rate_tolerances=default_rate_tolerances(model),
+        residual_tolerances=defaultdict(lambda: 1e-5),
+        time_manager=default_initialization_time_manager(),
+        # Initialize with the first well interval only, constant in time.
+        initialization_params={
+            "well_schedule": {
+                well: intervals[:1]
+                for well, intervals in model_params["well_schedule"].items()
+            }
+        },
     )
 
-    # Main run
-    model = MainModel(model_params)
-    model.initialization_model = init_model
-    nonlinear_solver = set_nonlinear_solver(
-        iterative_linear_solver=True, scheme=SOLVER_SCHEME
-    )
-    reset_time_io()
-    t0_main = time.perf_counter()
+    t0 = time.perf_counter()
     pp.ModelRunner(
-        model, nonlinear_solver=nonlinear_solver, time_stepper=time_stepper
+        model,
+        nonlinear_solver=set_nonlinear_solver(
+            iterative_linear_solver=True,
+            scheme=SOLVER_SCHEME,
+            nonlinear_solver_params={
+                "nl_convergence_res_atol": 1e-5,
+                "nl_convergence_inc_atol": 1e-8,
+            },
+        ),
+        time_stepper=time_stepper,
     ).run()
-    t1_main = time.perf_counter()
     model.save_results()
     print(
-        f"Init: {init_model.time_manager.time_index} steps, {t1_init - t0_init:.1f} s; "
-        f"main: {model.time_manager.time_index} steps, {t1_main - t0_main:.1f} s"
+        f"{model.time_manager.time_index} time steps, {time.perf_counter() - t0:.1f} s"
     )

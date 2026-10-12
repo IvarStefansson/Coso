@@ -2,6 +2,7 @@ from typing import Callable
 
 import numpy as np
 import porepy as pp
+from porepy.examples.geothermal_reservoir import WellBCType
 
 
 class InitialCosoBoundaryConditions:
@@ -322,7 +323,8 @@ class CosoBoundaryConditions:
 
 
 class NeumannWellBCsFromSchedule(pp.PorePyModel):
-    """Class defining Neumann BCs on well grids during the first time interval."""
+    """Class defining Neumann BCs on well grids in the Neumann intervals of the well
+    schedule (:class:`~porepy.examples.geothermal_reservoir.WellInterval`)."""
 
     def bc_type_darcy_flux(self, sd: pp.Grid) -> pp.BoundaryCondition:
         """Return Neumann BC for Darcy flux on well grids during first time interval.
@@ -382,25 +384,20 @@ class NeumannWellBCsFromSchedule(pp.PorePyModel):
     def neumann_bcs_active(self, sd: pp.Grid) -> bool:
         """Check if Neumann BCs on well grids are active.
 
+        This is defined by the well schedule, see
+        :meth:`porepy.examples.geothermal_reservoir.WellSchedule.well_bc_type`.
+
         Parameters:
             sd: The subdomain for which to check if Neumann BCs are active.
 
         Returns:
-            True if the current time is within the first time interval, False otherwise.
+            True if the well of the subdomain is Neumann at the current time.
+
         """
-        is_neumann = False
-        if self.params.get("neumann_intervals") is not None:
-            neumann_intervals = self.params["neumann_intervals"]
-            current_time = self.time_manager.time
-            if np.isclose(current_time, 0.0):
-                # At time zero, we are before the first time interval, so Neumann BCs are active.
-                is_neumann = True
-                return is_neumann
-            for interval in neumann_intervals:
-                if interval[0] < current_time <= interval[1]:
-                    is_neumann = True
-                    break
-        return is_neumann
+        bc_type = self.well_bc_type(self.parent_well(sd).tags["well_name"])
+        if bc_type == WellBCType.ROBIN:
+            raise NotImplementedError("Robin boundary conditions on wells.")
+        return bc_type == WellBCType.NEUMANN
 
     def bc_values_darcy_flux(self, bg: pp.BoundaryGrid) -> np.ndarray:
         """Return boundary values for pressure on all boundaries.
@@ -504,9 +501,11 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
     behaves identically to :class:`NeumannWellBCsFromSchedule`.
     """
 
-    def _transition_duration(self) -> float:
+    def _transition_duration(self, well_name: str | None = None) -> float:
         dt = float(self.params.get("well_transition_duration", 0.0))
-        neumann_intervals = self.params.get("neumann_intervals", [])
+        neumann_intervals = (
+            self.well_bc_intervals(well_name, WellBCType.NEUMANN) if well_name is not None else []
+        )
         if dt > 0.0 and neumann_intervals:
             # Each Neumann interval is (shut_in_start, shut_in_start + shut_in_duration
             # - transition_duration).  Recover the original shut_in_duration from the
@@ -521,10 +520,12 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
                 )
         return dt
 
-    def _transition_progress(self, start_times: list[float]) -> float | None:
+    def _transition_progress(
+        self, well_name: str, start_times: list[float]
+    ) -> float | None:
         """Return linear progress ∈ (0, 1] if the current time is inside a
         transition window starting at one of ``start_times``, else ``None``."""
-        dt = self._transition_duration()
+        dt = self._transition_duration(well_name)
         if dt <= 0.0:
             return None
         t = self.time_manager.time
@@ -533,11 +534,11 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
                 return (t - t0) / dt
         return None
 
-    def _shutin_start_times(self) -> list[float]:
+    def _shutin_start_times(self, well_name: str) -> list[float]:
         """Start time of each shut-in interval (Dirichlet → Neumann transition)."""
-        return [s for s, _ in self.params.get("neumann_intervals", [])]
+        return [s for s, _ in self.well_bc_intervals(well_name, WellBCType.NEUMANN)]
 
-    def _production_start_times(self) -> list[float]:
+    def _production_start_times(self, well_name: str) -> list[float]:
         """Start of each production ramp window (Neumann → Dirichlet transition).
 
         These are the *end* times of the Neumann intervals stored in params, which
@@ -547,11 +548,11 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
         ``well_transition_duration`` seconds of each shut-in period.
 
         If an initial shut-in interval ``(0, t_end)`` is included in
-        ``neumann_intervals``, its end time ``t_end`` appears first so that the
+        the well schedule, its end time ``t_end`` appears first so that the
         opening ramp at simulation start is handled by the same mechanism as
         mid-simulation production ramps.
         """
-        return [e for _, e in self.params.get("neumann_intervals", [])]
+        return [e for _, e in self.well_bc_intervals(well_name, WellBCType.NEUMANN)]
 
     def _top_face_index(self, sd: pp.Grid) -> int | None:
         """Index of the top boundary face on a well grid, or ``None``."""
@@ -568,7 +569,7 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
         Covers both production and injection wells.
         """
         super().after_nonlinear_convergence()
-        if self._transition_duration() <= 0.0:
+        if float(self.params.get("well_transition_duration", 0.0)) <= 0.0:
             return
         if not hasattr(self, "_cached_well_top_flux"):
             self._cached_well_top_flux: dict[str, float] = {}
@@ -590,7 +591,9 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
             # Updating mid-ramp would re-anchor the starting value and distort all
             # subsequent steps in that window (the formula would use a partially-ramped
             # value as its "from" endpoint rather than the true pre-ramp value).
-            if self._transition_progress(self._shutin_start_times()) is None:
+            if self._transition_progress(
+                well_name, self._shutin_start_times(well_name)
+            ) is None:
                 # Not inside a shut-in-start ramp: safe to refresh flux cache.
                 flux_vals = self.darcy_flux([sd]).value(self.equation_system)
                 # When setting BC values, the sign of the flux is with respect to the
@@ -604,7 +607,9 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
                 self._cached_well_top_flux[well_name] = float(
                     flux_vals[face_idx] * outwards_normal_sign
                 )
-            if self._transition_progress(self._production_start_times()) is None:
+            if self._transition_progress(
+                well_name, self._production_start_times(well_name)
+            ) is None:
                 # Not inside a production-start ramp: safe to refresh pressure cache.
                 p_vals = self.pressure_trace([sd]).value(self.equation_system)
                 self._cached_well_top_pressure[well_name] = float(p_vals[face_idx])
@@ -627,7 +632,10 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
             )
         ):
             return vals
-        alpha = self._transition_progress(self._production_start_times())
+        well_name = parent_well.tags["well_name"]
+        alpha = self._transition_progress(
+            well_name, self._production_start_times(well_name)
+        )
         if alpha is None:
             return vals
         domain_sides = self.domain_boundary_sides(bg)
@@ -664,7 +672,10 @@ class SmoothWellTransitions(NeumannWellBCsFromSchedule):
             )
         ):
             return vals
-        alpha = self._transition_progress(self._shutin_start_times())
+        well_name = parent_well.tags["well_name"]
+        alpha = self._transition_progress(
+            well_name, self._shutin_start_times(well_name)
+        )
         if alpha is None:
             return vals
         domain_sides = self.domain_boundary_sides(bg)

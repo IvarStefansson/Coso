@@ -136,7 +136,9 @@ def th_linear_solver_factory():
     )
 
 
-def _monolithic_nonlinear_solver(iterative_linear_solver: bool):
+def _monolithic_nonlinear_solver(
+    iterative_linear_solver: bool, nonlinear_solver_params: dict | None = None
+):
     """Build the monolithic solver: one Newton over the fully coupled THM system.
 
     Ported from the `main` branch, where the same scheme was assembled as
@@ -173,11 +175,16 @@ def _monolithic_nonlinear_solver(iterative_linear_solver: bool):
     # The tailored contact line search needs the model to provide opening_indicator and
     # sliding_indicator, i.e. to mix in pp.models.solution_strategy.ContactIndicators.
     return pp.solvers.ConstraintLineSearchNonlinearSolver(
-        params=monolithic_solver_params, linear_solver=linear_solver
+        params={**monolithic_solver_params, **(nonlinear_solver_params or {})},
+        linear_solver=linear_solver,
     )
 
 
-def set_nonlinear_solver(iterative_linear_solver=False, scheme="sequential"):
+def set_nonlinear_solver(
+    iterative_linear_solver=False,
+    scheme="sequential",
+    nonlinear_solver_params: dict | None = None,
+):
     """Build the nonlinear solver for the Coso models.
 
     Parameters:
@@ -185,18 +192,17 @@ def set_nonlinear_solver(iterative_linear_solver=False, scheme="sequential"):
             solvers instead of a direct solve.
         scheme: Either "sequential" (default) for the mechanics/pT split, or
             "monolithic" for a single Newton over the fully coupled system.
+        nonlinear_solver_params: Overrides for the default nonlinear solver params
+            (e.g. ``{"nl_max_iterations": 40}``), merged on top of the defaults. For
+            "monolithic" they update ``monolithic_solver_params``; for "sequential"
+            they update the params of both Newton subsolvers (the outer sequential
+            solver's own iteration limit and criteria are not affected).
 
     """
-    logging.basicConfig(level=logging.INFO)
-    logging.getLogger("porepy.numerics.solvers.nonlinear_solvers").setLevel(
-        logging.WARNING
-    )
-    logging.getLogger("porepy.numerics.solvers.linear_solvers.linear_solver").setLevel(
-        logging.WARNING
-    )
+    overrides = nonlinear_solver_params or {}
 
     if scheme == "monolithic":
-        return _monolithic_nonlinear_solver(iterative_linear_solver)
+        return _monolithic_nonlinear_solver(iterative_linear_solver, overrides)
     if scheme != "sequential":
         raise ValueError(
             f"Unknown nonlinear solver scheme {scheme!r}. "
@@ -260,6 +266,7 @@ def set_nonlinear_solver(iterative_linear_solver=False, scheme="sequential"):
                     "nl_convergence_res_atol": 1e-4,
                     "nl_divergence_inc_atol": 1e20,
                     "nl_divergence_res_atol": 1e20,
+                    **overrides,
                 },
                 equation_tags=[
                     pp.solvers.DefaultEquationTags.momentum_balance,
@@ -283,6 +290,7 @@ def set_nonlinear_solver(iterative_linear_solver=False, scheme="sequential"):
                     "nl_divergence_res_atol": 1e20,
                     "global_line_search": 1,
                     "local_line_search": 0,
+                    **overrides,
                 },
                 equation_tags=[
                     pp.solvers.DefaultEquationTags.mass_balance,
