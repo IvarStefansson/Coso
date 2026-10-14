@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Sequence
+
 import numpy as np
 import porepy as pp
 from porepy.time_stepper import (
@@ -51,6 +53,71 @@ def build_time_stepper(
     return time_stepper
 
 
+def name_schedule_intervals(
+    schedule: np.ndarray,
+    neumann_intervals: Sequence[tuple[float, float]],
+    transition_duration: float,
+) -> list[str]:
+    """Name each schedule interval after the well operation taking place in it.
+
+    The well operation is read off the zero-flux (Neumann) windows of the well
+    schedule, see ``create_schedule``. Every window ``c`` (1-based, in the order
+    given) starts with a shut-in ramp of length ``transition_duration`` and ends with a
+    production ramp of the same length, and the production period precedes it. The
+    names are
+
+    - ``production_c``: Dirichlet wells, before window ``c``;
+    - ``shut_in_ramp_c``: ramp from production to zero flux;
+    - ``relaxation_c``: zero-flux wells, the reservoir relaxes;
+    - ``production_ramp_c``: ramp from zero flux back to production.
+
+    A window starting at t=0 (the initial shut-in) has no shut-in ramp and is named
+    ``initial_relaxation`` / ``initial_production_ramp``; the production windows are
+    then numbered from the first window that starts later. Where bin boundaries
+    split a phase into several intervals, ``_bin{j}`` is appended.
+    """
+    windows = list(neumann_intervals)
+    initial = windows[0][0] <= 0.0 if windows else False
+    cycles = windows[1:] if initial else windows
+    mids = 0.5 * (schedule[:-1] + schedule[1:])
+
+    def cycle_number(t: float) -> int:
+        """1-based number of the first non-initial window ending after ``t``."""
+        for c, (_, end) in enumerate(cycles, start=1):
+            if t < end + transition_duration:
+                return c
+        return len(cycles) + 1
+
+    labels = []
+    for t in mids:
+        if initial and t < windows[0][1] + transition_duration:
+            label = (
+                "initial_relaxation"
+                if t < windows[0][1]
+                else "initial_production_ramp"
+            )
+        else:
+            c = cycle_number(t)
+            start, end = cycles[c - 1] if c <= len(cycles) else (np.inf, np.inf)
+            if t < start:
+                label = f"production_{c}"
+            elif t < start + transition_duration:
+                label = f"shut_in_ramp_{c}"
+            elif t < end:
+                label = f"relaxation_{c}"
+            else:
+                label = f"production_ramp_{c}"
+        labels.append(label)
+
+    counts = {label: labels.count(label) for label in labels}
+    seen: dict[str, int] = {}
+    names = []
+    for label in labels:
+        seen[label] = seen.get(label, 0) + 1
+        names.append(f"{label}_bin{seen[label]}" if counts[label] > 1 else label)
+    return names
+
+
 def time_steppers_coso(
     schedule: np.ndarray,
     dt: float,
@@ -63,6 +130,7 @@ def time_steppers_coso(
     dt_start_first: float | None = None,
     dt_max_divisor: float = 2.0,
     dt_min: float = 1e-2,
+    interval_names: Sequence[str] | None = None,
 ) -> tuple[TimeStepper, TimeStepper]:
     """Per-interval time stepper for run_example_2/3's production schedule.
 
@@ -102,6 +170,9 @@ def time_steppers_coso(
     (so with the default 2, a bin-only interval is covered in two steps), and
     ``dt_min`` is the smallest step any interval may shrink to before the run is
     aborted. Both are exposed so analyze_time_stepping.py can replay alternatives.
+
+    ``interval_names`` gives one name per schedule interval (see
+    :func:`name_schedule_intervals`); the default is ``interval_{i}``.
     """
     # Target reduction factor per interval boundary crossing. This sets the
     # maximum time step size for each interval as a fraction of the interval
@@ -109,6 +180,13 @@ def time_steppers_coso(
     ks = np.full(schedule.shape[0] - 1, dt_max_divisor)
     interval_lengths = np.diff(schedule)
     decrease_factor, increase_factor = iter_relax_factors
+
+    if interval_names is None:
+        interval_names = [f"interval_{i}" for i in range(schedule.shape[0] - 1)]
+    elif len(interval_names) != schedule.shape[0] - 1:
+        raise ValueError(
+            f"Expected {schedule.shape[0] - 1} interval names, got {len(interval_names)}."
+        )
 
     if is_transition is None:
         dt_starts = np.full(schedule.shape[0] - 1, dt)
@@ -141,10 +219,10 @@ def time_steppers_coso(
                     retry_factor=recomp_factor,
                 )
             ],
-            name=f"interval_{i}",
+            name=name,
         )
-        for i, (t_start, length, k, dt_start) in enumerate(
-            zip(schedule[:-1], interval_lengths, ks, dt_starts)
+        for name, t_start, length, k, dt_start in zip(
+            interval_names, schedule[:-1], interval_lengths, ks, dt_starts
         )
     ]
     time_manager = TimeManager(
