@@ -1,3 +1,16 @@
+"""
+Single artificial fracture. Others, meant to resemble coso setup.
+
+Runs successfully, 153 time steps, 11733.4 s on YZ's nrec machine.
+
+PorePy: bce2db427c0a20b9bacc799a90f12b83f5ec3d19
+pp_solvers: 1ba92eae72e0fa2c337a4d016a62a32578ccec55
+
+Command (from coso dir):
+python runscript_1.py > runscript_1.stdout 2> runscript_1.stderr
+
+"""
+
 from collections import defaultdict
 import logging
 import sys
@@ -43,21 +56,20 @@ from porepy.models.contact_mechanics import (
 )
 from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 from solution_strategy import SolutionStrategy
-from time_stepping import time_steppers_coso
+from time_stepping import name_schedule_intervals, time_steppers_coso
 from wells import _WellDataBase
 from porepy.applications.initialization.initialization import (
     initialization_pipeline,
     default_rate_tolerances,
     default_initialization_time_manager,
-    default_residual_tolerances,
 )
 
 # ----------------------------------------------------------------------------------
 # Run settings
 # ----------------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parent
-OUTPUT_FOLDER = REPO_ROOT / "well_tip_fracture_run"
 FILE_NAME = Path(__file__).stem
+OUTPUT_FOLDER = REPO_ROOT / FILE_NAME
 
 FINAL_TIME = 2 * pp.YEAR
 PRODUCTION_PERIOD = 1 * pp.YEAR
@@ -67,16 +79,16 @@ TRANSITION_DURATION = 2 * pp.HOUR  # Length of the Neumann <-> Dirichlet ramps.
 NUM_BINS_PER_INTERVAL = 3  # Extra output times per production / shut-in interval.
 
 BOUNDARY_STRAIN_RATE = 1.0e-6  # [1/year], tectonic extension in x.
-CELL_SIZE_BOUNDARY = 318.0 * 2  # [m]
-CELL_SIZE_FRACTURE = 76.0 * 2  # [m]
-CELL_SIZE_MIN = 38.0 * 2  # [m]
+cell_size_multiplier = 1  # 1 corresponds to original COSO
+CELL_SIZE_BOUNDARY = 318.0 * cell_size_multiplier  # [m]
+CELL_SIZE_FRACTURE = 76.0 * cell_size_multiplier  # [m]
+CELL_SIZE_MIN = 38.0 * cell_size_multiplier  # [m]
 
 SOLVER_SCHEME = "monolithic"
 TIME_STEPPER_PARAMS = {
-    "iter_optimal_range": (10, 15),
+    "iter_optimal_range": (5, 10),
     "iter_relax_factors": (0.6, 2.5),
     "recomp_factor": 0.2,
-    "max_attempts": 10,
     "dt_start_transition": 10,
     "dt_max_divisor": 2.0,
     "dt_min": 1e-2,
@@ -153,7 +165,8 @@ class WellTipFractureGeometry(CosoGeometry):
 
 
 # ----------------------------------------------------------------------------------
-# Initial state and tectonic loading (no initialization run)
+# Initial state and tectonic loading (the initial state is refined by the
+# initialization pipeline)
 # ----------------------------------------------------------------------------------
 class DepthDisplacementInitialAndBoundaryConditions(CosoBoundaryConditionsDisplacement):
     """Start from the depth-dependent displacement of ``CosoBackgroundValues``.
@@ -182,7 +195,10 @@ class DepthDisplacementInitialAndBoundaryConditions(CosoBoundaryConditionsDispla
 # Model
 # ----------------------------------------------------------------------------------
 class CosoModel(
-    # Initial conditions and boundary conditions.
+    # Initial conditions and boundary conditions. The order matters: the well mixins
+    # (SmoothWellTransitions, NeumannWellBCsFromSchedule) modify the values and BC types
+    # of the mixins below them via super(), e.g. WellBoundaryConditions and the generic
+    # boundary conditions, so they must come first.
     CosoBackgroundValues,  # Geotherm, hydrostatic pressure, depth displacement.
     SmoothWellTransitions,  # Ramps between shut-in and production.
     NeumannWellBCsFromSchedule,  # Zero-flux wells during shut-in.
@@ -234,8 +250,8 @@ def create_schedule(
 
     Shut-in periods correspond to intervals where Neumann (zero-flux) well boundary
     conditions are applied instead of prescribed pressures.  The returned
-    ``neumann_intervals`` list marks exactly these shut-in windows so the boundary
-    condition mixin can switch behaviour.
+    ``neumann_intervals`` list marks exactly these shut-in windows; :func:`well_schedule`
+    turns them into the Neumann intervals of the well schedule.
 
     If ``num_bins_per_interval`` is given, equally-spaced bin-boundary times are
     inserted into the schedule for *both* the production and shut-in sub-intervals of
@@ -266,7 +282,8 @@ def create_schedule(
             - schedule (np.ndarray): Sorted array of time checkpoints (seconds),
               starting at 0 and ending at the last cycle boundary.
             - neumann_intervals (list[tuple[float, float]]): One ``(start, end)``
-              tuple per shut-in period, used to activate zero-flux well BCs.
+              tuple per shut-in period, with zero-flux well BCs. Input of
+              :func:`well_schedule`.
             - is_transition (np.ndarray): Boolean mask aligned with ``schedule``,
               True where the checkpoint is a "mandatory" one (BC type switch or
               ramp start/end) and False where it is a purely cosmetic bin-boundary
@@ -294,14 +311,15 @@ def create_schedule(
     # For each cycle i (1-indexed), add the shut-in start (= production end) and the
     # cycle end.  These are the mandatory checkpoint times that delimit each sub-
     # interval boundary.  t=0 is prepended separately below. If a transition duration is
-    # set, also insert the time of full shut-in (shut-in start + transition duration)
-    # and the time of production ramp start (cycle end - transition duration) for each
-    # cycle. This ensures that the time integrator always steps at these critical times
-    # where the BC type or target value changes, so the transition is well-resolved and
-    # consistent across runs. The production ramp start is placed exactly at the end of
-    # the transition window that follows and the Neumann interval end (= cycle end −
-    # transition_duration) so the Neumann→Dirichlet switch always starts at an exact
-    # schedule boundary.
+    # set, also insert, for each cycle:
+    #   - the time of full shut-in (shut-in start + transition duration), when the
+    #     shut-in flux ramp has finished, and
+    #   - the production ramp start (cycle end - transition duration), which is also the
+    #     end of the Neumann interval.
+    # This ensures that the time integrator always steps at these times where the BC
+    # type or target value changes, so the transitions are well-resolved and consistent
+    # across runs, and the Neumann->Dirichlet switch always starts at an exact schedule
+    # boundary.
     checkpoints = []
     for i in np.arange(1, n + 1):
         checkpoints.append(i * production_period - shut_in_duration)
@@ -320,7 +338,7 @@ def create_schedule(
     # in the Neumann interval; they form the production ramp window during which the BC
     # type is already Dirichlet but the well-head pressure is ramped from the last
     # reservoir pressure toward the scheduled target.  When transition_duration == 0,
-    # end == i*T and the full shut-in window is Neumann (legacy behaviour).
+    # end == i*T and the full shut-in window is Neumann.
     neumann_intervals = [
         (
             i * production_period - shut_in_duration,
@@ -336,7 +354,8 @@ def create_schedule(
     # checkpoints into the schedule. The pure zero-flux period runs from t=0 to
     # t=(initial_shutin_duration - transition_duration); the final transition_duration
     # seconds of the initial shut-in are the production ramp window, handled
-    # automatically by _production_start_times() / _transition_progress().
+    # automatically by SmoothWellTransitions (see boundary_conditions.py), which reads
+    # the end of each Neumann interval as a production start.
     if initial_shutin_duration > 0.0:
         if transition_duration > 0.0 and initial_shutin_duration <= transition_duration:
             raise ValueError(
@@ -396,8 +415,7 @@ def well_schedule(
 
     def intervals(**values: float) -> list[WellInterval]:
         return [
-            WellInterval(t, values, bc_type)
-            for t, bc_type in sorted(bc_types.items())
+            WellInterval(t, values, bc_type) for t, bc_type in sorted(bc_types.items())
         ]
 
     schedules = {}
@@ -427,7 +445,13 @@ if __name__ == "__main__":
         initial_shutin_duration=INITIAL_SHUTIN_DURATION,
     )
     time_stepper, _ = time_steppers_coso(
-        schedule, dt=1e3, is_transition=is_transition, **TIME_STEPPER_PARAMS
+        schedule,
+        dt=1e3,
+        is_transition=is_transition,
+        interval_names=name_schedule_intervals(
+            schedule, neumann_intervals, TRANSITION_DURATION
+        ),
+        **TIME_STEPPER_PARAMS,
     )
 
     # Re-fitted thermal expansion for the Coso T range (see physical_model.py).
@@ -467,6 +491,10 @@ if __name__ == "__main__":
 
     model = CosoModel(model_params)
 
+    # The initialization and the main run each need their own nonlinear solver
+    # instance: the solver depends on the model's grids, which are rebuilt at every
+    # prepare_simulation call (the initialization pipeline prepares the model several
+    # times). One solver cannot be shared between the two.
     initialization_pipeline(
         model,
         nonlinear_solver=set_nonlinear_solver(
@@ -480,7 +508,10 @@ if __name__ == "__main__":
         rate_tolerances=default_rate_tolerances(model),
         residual_tolerances=defaultdict(lambda: 1e-5),
         time_manager=default_initialization_time_manager(),
-        # Initialize with the first well interval only, constant in time.
+        # Initialize with the first well interval only (Neumann, i.e. the wells are shut
+        # in), held constant in time. The initialization clock runs far beyond the
+        # first interval, so the full schedule would switch the wells from Neumann to
+        # Dirichlet in the middle of the initialization.
         initialization_params={
             "well_schedule": {
                 well: intervals[:1]
@@ -492,6 +523,9 @@ if __name__ == "__main__":
     t0 = time.perf_counter()
     pp.ModelRunner(
         model,
+        # The initialization pipeline has already prepared the model; preparing again
+        # would discard the initialized state.
+        params={"prepare_simulation": False},
         nonlinear_solver=set_nonlinear_solver(
             iterative_linear_solver=True,
             scheme=SOLVER_SCHEME,
