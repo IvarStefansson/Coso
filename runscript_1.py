@@ -3,7 +3,7 @@ Single artificial fracture. Others, meant to resemble coso setup.
 
 Runs successfully, 153 time steps, 11733.4 s on YZ's nrec machine.
 
-PorePy: bce2db427c0a20b9bacc799a90f12b83f5ec3d19
+PorePy: ca71152a35b48f424eda236a458767c1c99f59fc
 pp_solvers: 1ba92eae72e0fa2c337a4d016a62a32578ccec55
 
 Command (from coso dir):
@@ -52,7 +52,7 @@ from porepy.examples.geothermal_reservoir import (
     WellInterval,
 )
 from porepy.models.contact_mechanics import (
-    RadialReturnTangentialContactMechanicsEquation,
+    ScaledProjectionTangentialContactMechanicsEquation,
 )
 from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 from solution_strategy import SolutionStrategy
@@ -220,7 +220,7 @@ class CosoModel(
     HydrostaticBoundaryPressureValues,
     ThermalGradientBoundaryTemperatureValues,
     LithostaticBoundaryStressValues,
-    RadialReturnTangentialContactMechanicsEquation,
+    ScaledProjectionTangentialContactMechanicsEquation,
     PhysicalModel,  # Gravity + porepy's thermo-poromechanics.
 ):
     """Coso geothermal reservoir with a single fracture connecting the well tips."""

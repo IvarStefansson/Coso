@@ -18,7 +18,7 @@ from geometry import (
     FaultPlaneGeometry,
 )
 from porepy.models.contact_mechanics import (
-    RadialReturnTangentialContactMechanicsEquation,
+    ScaledProjectionTangentialContactMechanicsEquation,
 )
 from material_parameters import granodiorite_values
 from physical_model import (
@@ -172,7 +172,7 @@ class _BaseModel(
     HydrostaticBoundaryPressureValues,
     ThermalGradientBoundaryTemperatureValues,
     LithostaticBoundaryStressValues,
-    RadialReturnTangentialContactMechanicsEquation,
+    ScaledProjectionTangentialContactMechanicsEquation,
     PhysicalModel,
 ):
     """Model for the Coso geothermal reservoir."""

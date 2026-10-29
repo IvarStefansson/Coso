@@ -12,7 +12,7 @@ dt halved ten times from 5.0e9 with no converged Newton solve:
 The control failing is the point: this says nothing about the monolithic scheme, so
 the test cannot currently distinguish a working port from a broken one. It is kept
 because it is the only check that would catch a `pp_solvers.thm_factory` group/DoF
-mismatch against this model's `RadialReturnTangentialContactMechanicsEquation` and
+mismatch against this model's `ScaledProjectionTangentialContactMechanicsEquation` and
 `DarcysLawAdEverywhere` -- something the wiring assertions in test_solver_setup.py
 cannot see, since that failure only surfaces once a real linear system is assembled.
 
