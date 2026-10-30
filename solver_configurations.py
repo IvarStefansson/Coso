@@ -81,7 +81,7 @@ linear_solver_params = {
     # },
     "gmres": {
         # Options for the outer solver
-        # "ksp_monitor": None,
+        "ksp_monitor": None,
         # "ksp_type": "fgmres",
         "ksp_max_it": 400,
         # "ksp_gmres_classicalgramschmidt": False,
@@ -97,4 +97,20 @@ linear_solver_params = {
     #     "ksp_type": "gmres",
     #     "ksp_rtol": 1e-12,
     # },
+    "python_permutation": {
+        "ksp_monitor": None,
+    },
+    "system_amg": {
+        "pc_hypre_boomeramg_P_max": 16,  # I took this parameter from GEOS. They apply it to boomeramg configured for p-T system. No idea what the implications are.
+        "pc_type": "hypre",
+        "pc_hypre_type": "boomeramg",
+        # "pc_hypre_boomeramg_relax_type_all": "l1scaled-SOR/Jacobi",
+        #
+        "pc_hypre_boomeramg_smooth_type": "ilu",
+        "pc_hypre_boomeramg_ilu_level": 0,
+        #
+        # "pc_hypre_type": "ilu",
+        # "pc_hypre_ilu_maxiter": 1,
+        # "pc_hypre_ilu_local_reordering": 1,
+    },
 }

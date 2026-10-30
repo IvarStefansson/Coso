@@ -4,6 +4,9 @@ fracture through the well tips. Wells are trimmed below the fractures they touch
 
 Not yet run.
 
+PorePy: bce2db427c0a20b9bacc799a90f12b83f5ec3d19
+pp_solvers: 1ba92eae72e0fa2c337a4d016a62a32578ccec55
+
 Command (from coso dir):
 python runscript_3.py > runscript_3.stdout 2> runscript_3.stderr
 
@@ -50,7 +53,7 @@ from porepy.examples.geothermal_reservoir import (
     WellInterval,
 )
 from porepy.models.contact_mechanics import (
-    RadialReturnTangentialContactMechanicsEquation,
+    ScaledProjectionTangentialContactMechanicsEquation,
 )
 from porepy.viz.data_saving_model_mixin import FractureDeformationExporting
 from solution_strategy import SolutionStrategy
@@ -288,7 +291,7 @@ class CosoModel(
     HydrostaticBoundaryPressureValues,
     ThermalGradientBoundaryTemperatureValues,
     LithostaticBoundaryStressValues,
-    RadialReturnTangentialContactMechanicsEquation,
+    ScaledProjectionTangentialContactMechanicsEquation,
     PhysicalModel,  # Gravity + porepy's thermo-poromechanics.
 ):
     """Coso reservoir with faults 0000/0001/0003/0005 and a well-tip fracture."""
@@ -571,6 +574,7 @@ if __name__ == "__main__":
         model,
         nonlinear_solver=set_nonlinear_solver(
             iterative_linear_solver=True,
+            system_amg=True,
             scheme=SOLVER_SCHEME,
             nonlinear_solver_params={
                 "nl_convergence_res_atol": 1e-5,
@@ -600,6 +604,7 @@ if __name__ == "__main__":
         params={"prepare_simulation": False},
         nonlinear_solver=set_nonlinear_solver(
             iterative_linear_solver=True,
+            system_amg=True,
             scheme=SOLVER_SCHEME,
             nonlinear_solver_params={
                 "nl_convergence_res_atol": 1e-5,

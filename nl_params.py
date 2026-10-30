@@ -136,8 +136,94 @@ def th_linear_solver_factory():
     )
 
 
+from pp_solvers.preconditioners import (
+    nested_schur_complements,
+    BlockDiagonalInverter,
+    BlockDiagonalPreconditioner,
+    FixedStressInverter,
+)
+from pp_solvers.transformations import (
+    ContactLinearTransformation,
+    ScaleSpecificVolume,
+)
+
+
+def thm_factory_system_amg():
+    contact_groups: list[EquationVariableGroup] = [
+        DefaultEquationVariableGroups.contact_mechanics_group
+    ]
+    interface_groups: list[EquationVariableGroup] = [
+        DefaultEquationVariableGroups.interface_darcy_flux_group,
+        DefaultEquationVariableGroups.interface_enthalpy_flux_group,
+        DefaultEquationVariableGroups.interface_fourier_flux_group,
+        DefaultEquationVariableGroups.well_flux_group,
+        DefaultEquationVariableGroups.well_enthalpy_flux_group,
+    ]
+    mechanics_groups: list[EquationVariableGroup] = [
+        DefaultEquationVariableGroups.mechanics_group,
+        DefaultEquationVariableGroups.interface_force_balance_group,
+    ]
+    mass_balance_groups: list[EquationVariableGroup] = [
+        DefaultEquationVariableGroups.mass_balance_pressure_matrix_group,
+        DefaultEquationVariableGroups.mass_balance_pressure_fractures_group,
+        DefaultEquationVariableGroups.mass_balance_pressure_intersections_group,
+    ]
+    energy_balance_groups: list[EquationVariableGroup] = [
+        DefaultEquationVariableGroups.energy_balance_temperature_group,
+    ]
+
+    solver = GMRES(
+        preconditioner=nested_schur_complements(
+            [
+                {
+                    "subsolver": BlockDiagonalPreconditioner(
+                        groups=contact_groups, key="contact"
+                    ),
+                    "approximate_inverter": BlockDiagonalInverter(),
+                },
+                {
+                    "subsolver": ILU(groups=interface_groups, key="interface_flow"),
+                    "approximate_inverter": DiagonalInverter(),
+                },
+                {
+                    "subsolver": AMG(
+                        groups=mechanics_groups,
+                        key="mechanics_amg",
+                        vector_problem=True,
+                    ),
+                    "approximate_inverter": FixedStressInverter(),
+                },
+                {
+                    "subsolver": PythonPermutationWrapper(
+                        permutation_groups=[
+                            energy_balance_groups,
+                            mass_balance_groups,
+                        ],
+                        inner_subsolver=AMG(
+                            groups=energy_balance_groups + mass_balance_groups,
+                            key="system_amg",
+                        ),
+                    ),
+                },
+            ]
+        )
+    )
+
+    return LinearSolverConfiguration(
+        transformations=[
+            ContactLinearTransformation(),
+            ScaleSpecificVolume(
+                groups=[DefaultEquationVariableGroups.energy_balance_temperature_group]
+            ),
+        ],
+        solver=solver,
+    )
+
+
 def _monolithic_nonlinear_solver(
-    iterative_linear_solver: bool, nonlinear_solver_params: dict | None = None
+    iterative_linear_solver: bool,
+    nonlinear_solver_params: dict | None = None,
+    system_amg: bool = False,
 ):
     """Build the monolithic solver: one Newton over the fully coupled THM system.
 
@@ -166,7 +252,9 @@ def _monolithic_nonlinear_solver(
         if USE_SOLVER_SELECTOR:
             options = {**linear_solver_params, **linear_solver_selector_options}
         linear_solver = pp_solvers.IterativeLinearSolver(
-            configuration_factory=pp_solvers.thm_factory,
+            configuration_factory=thm_factory_system_amg
+            if system_amg
+            else pp_solvers.thm_factory,
             solver_options=options,
             solver_selector=solver_selector if USE_SOLVER_SELECTOR else None,
         )
@@ -184,6 +272,7 @@ def set_nonlinear_solver(
     iterative_linear_solver=False,
     scheme="sequential",
     nonlinear_solver_params: dict | None = None,
+    system_amg: bool = False,
 ):
     """Build the nonlinear solver for the Coso models.
 
@@ -202,7 +291,9 @@ def set_nonlinear_solver(
     overrides = nonlinear_solver_params or {}
 
     if scheme == "monolithic":
-        return _monolithic_nonlinear_solver(iterative_linear_solver, overrides)
+        return _monolithic_nonlinear_solver(
+            iterative_linear_solver, overrides, system_amg=system_amg
+        )
     if scheme != "sequential":
         raise ValueError(
             f"Unknown nonlinear solver scheme {scheme!r}. "
@@ -217,10 +308,10 @@ def set_nonlinear_solver(
             delete_matrices=False,
             configuration_factory=th_linear_solver_factory,
             solver_options={
-                # "gmres": {
-                #     "ksp_monitor": None,
-                #     "ksp_max_it": 10,
-                # },
+                "gmres": {
+                    "ksp_monitor": None,
+                    # "ksp_max_it": 10,
+                },
                 # "cpr0_energy": {
                 #     "ksp_monitor": None,
                 # },
